@@ -1,0 +1,110 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "S3M",
+  "projectDescription": "Multipart uploads using Laravel and AWS S3 for handling large files in serverless environments",
+  "theme": "palm",
+  "primaryColor": "#848c8e",
+  "lightColor": "#11161e",
+  "darkColor": "#cfd0d2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/aws-setup",
+              "configuration/options",
+              "configuration/authorization"
+            ]
+          },
+          {
+            "group": "Usage Guide",
+            "pages": [
+              "usage/php-usage",
+              "usage/javascript-usage",
+              "usage/handling-uploads"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/customization",
+              "advanced/events",
+              "advanced/error-handling",
+              "advanced/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "PHP API",
+            "pages": [
+              "api/php/s3m-class",
+              "api/php/controller",
+              "api/php/requests"
+            ]
+          },
+          {
+            "group": "JavaScript API",
+            "pages": [
+              "api/javascript/s3m-class",
+              "api/javascript/options",
+              "api/javascript/methods"
+            ]
+          },
+          {
+            "group": "Events & Configuration",
+            "pages": [
+              "api/events",
+              "api/config-reference"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multipart upload support for files exceeding 5GB S3 limit",
+    "Parallel chunk uploads with configurable concurrency (default: 5)",
+    "Automatic retry mechanism for failed chunk uploads (configurable retries)",
+    "Pre-signed URL generation for secure direct-to-S3 uploads",
+    "Authorization checks via Laravel policies before upload initiation",
+    "Event dispatching for upload lifecycle (created, completed)",
+    "Configurable chunk size (default: 10MB)",
+    "Support for both PHP backend and JavaScript frontend integration",
+    "Temporary storage with automatic cleanup of incomplete uploads",
+    "Compatible with serverless environments (AWS Lambda, Vapor)"
+  ],
+  "publicApiSurface": [
+    "MrEduar\\S3M\\S3M::getBucket()",
+    "MrEduar\\S3M\\S3M::ensureConfigureVariablesAreAvailable()",
+    "MrEduar\\S3M\\S3M::storageClient()",
+    "MrEduar\\S3M\\S3M::completeMultipartUpload()",
+    "MrEduar\\S3M\\Facades\\S3M",
+    "S3MultipartController::createMultipartUpload()",
+    "S3MultipartController::signPartUpload()",
+    "S3MultipartController::completeMultipartUpload()",
+    "MultipartUploadCreated event",
+    "MultipartUploadCompleted event",
+    "s3m() JavaScript function",
+    "S3M JavaScript class: constructor(file, options)",
+    "S3M JavaScript class: upload()",
+    "S3M JavaScript class: startUpload()",
+    "S3M JavaScript class: uploadChunks()",
+    "S3M JavaScript class: completeUpload()",
+    "@s3m Blade directive"
+  ]
+}
