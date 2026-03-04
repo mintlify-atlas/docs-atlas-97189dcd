@@ -13,7 +13,7 @@ Dispatched when a new multipart upload is created on S3.
 
 **Namespace:** `MrEduar\S3M\Events\MultipartUploadCreated`
 
-**When Dispatched:** After successfully creating a multipart upload session via the `POST /s3m/multipart` endpoint (see S3MultipartController.php:50).
+**When Dispatched:** After successfully creating a multipart upload session via the `POST /s3m/create-multipart-upload` endpoint (see S3MultipartController.php:50).
 
 #### Properties
 
@@ -106,7 +106,7 @@ Dispatched when a multipart upload is successfully completed on S3.
 
 **Namespace:** `MrEduar\S3M\Events\MultipartUploadCompleted`
 
-**When Dispatched:** After successfully completing a multipart upload via the `POST /s3m/multipart/complete` endpoint (see S3MultipartController.php:107).
+**When Dispatched:** After successfully completing a multipart upload via the `POST /s3m/complete-multipart-upload` endpoint (see S3MultipartController.php:107).
 
 #### Properties
 
@@ -227,17 +227,18 @@ sequenceDiagram
     participant S3
     participant Events
     
-    Client->>S3M: POST /s3m/multipart
+    Client->>S3M: POST /s3m/create-multipart-upload
     S3M->>S3: createMultipartUpload()
     S3-->>S3M: uploadId
     S3M->>Events: MultipartUploadCreated
+    Events-->>Listeners: Notify
     S3M-->>Client: uuid, bucket, key, uploadId
     
-    Client->>S3M: POST /s3m/multipart/sign (per part)
+    Client->>S3M: POST /s3m/create-sign-part (per part)
     S3M-->>Client: presigned URL
     Client->>S3: PUT part data
     
-    Client->>S3M: POST /s3m/multipart/complete
+    Client->>S3M: POST /s3m/complete-multipart-upload
     S3M->>S3: completeMultipartUpload()
     S3-->>S3M: Location URL
     S3M->>Events: MultipartUploadCompleted
