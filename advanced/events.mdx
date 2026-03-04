@@ -1,0 +1,397 @@
+---
+title: Events
+description: Listen to and respond to multipart upload events
+---
+
+## Available Events
+
+S3M dispatches two events during the multipart upload lifecycle:
+
+### MultipartUploadCreated
+
+Dispatched when a new multipart upload is initialized.
+
+```php
+namespace MrEduar\S3M\Events;
+
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
+
+class MultipartUploadCreated
+{
+    use Dispatchable, SerializesModels;
+
+    public function __construct(
+        public string $uuid,
+        public string $bucket,
+        public string $key,
+        public string $uploadId,
+    ) {}
+}
+```
+
+<Info>
+  This event is dispatched in `S3MultipartController.php:50` after successfully creating a multipart upload.
+</Info>
+
+### MultipartUploadCompleted
+
+Dispatched when a multipart upload is successfully completed.
+
+```php
+namespace MrEduar\S3M\Events;
+
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
+
+class MultipartUploadCompleted
+{
+    use Dispatchable, SerializesModels;
+
+    public function __construct(
+        public string $bucket,
+        public string $key,
+        public string $uploadId,
+        public string $url,
+    ) {}
+}
+```
+
+<Info>
+  This event is dispatched in `S3MultipartController.php:107-112` after successfully completing a multipart upload.
+</Info>
+
+## Event Payloads
+
+<Accordion title="MultipartUploadCreated Payload">
+  **Properties:**
+  - `uuid` (string) - Unique identifier for the upload
+  - `bucket` (string) - S3 bucket name
+  - `key` (string) - S3 object key (file path)
+  - `uploadId` (string) - AWS multipart upload ID
+
+  **Example:**
+  ```php
+  $event->uuid;      // "550e8400-e29b-41d4-a716-446655440000"
+  $event->bucket;    // "my-bucket"
+  $event->key;       // "tmp/550e8400-e29b-41d4-a716-446655440000"
+  $event->uploadId;  // "VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA"
+  ```
+</Accordion>
+
+<Accordion title="MultipartUploadCompleted Payload">
+  **Properties:**
+  - `bucket` (string) - S3 bucket name
+  - `key` (string) - S3 object key (file path)
+  - `uploadId` (string) - AWS multipart upload ID
+  - `url` (string) - Public URL or S3 location of the uploaded file
+
+  **Example:**
+  ```php
+  $event->bucket;    // "my-bucket"
+  $event->key;       // "tmp/550e8400-e29b-41d4-a716-446655440000"
+  $event->uploadId;  // "VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA"
+  $event->url;       // "https://my-bucket.s3.amazonaws.com/tmp/550e8400..."
+  ```
+</Accordion>
+
+## Listening to Events
+
+### Create an Event Listener
+
+Generate a listener using Artisan:
+
+```bash
+php artisan make:listener LogMultipartUploadCreated --event=MultipartUploadCreated
+```
+
+### Listener Implementation
+
+<CodeGroup>
+```php LogMultipartUploadCreated.php
+namespace App\Listeners;
+
+use MrEduar\S3M\Events\MultipartUploadCreated;
+use Illuminate\Support\Facades\Log;
+
+class LogMultipartUploadCreated
+{
+    public function handle(MultipartUploadCreated $event): void
+    {
+        Log::info('Multipart upload created', [
+            'uuid' => $event->uuid,
+            'bucket' => $event->bucket,
+            'key' => $event->key,
+            'upload_id' => $event->uploadId,
+        ]);
+    }
+}
+```
+
+```php SaveUploadRecord.php
+namespace App\Listeners;
+
+use MrEduar\S3M\Events\MultipartUploadCreated;
+use App\Models\Upload;
+
+class SaveUploadRecord
+{
+    public function handle(MultipartUploadCreated $event): void
+    {
+        Upload::create([
+            'uuid' => $event->uuid,
+            'bucket' => $event->bucket,
+            'key' => $event->key,
+            'upload_id' => $event->uploadId,
+            'status' => 'in_progress',
+            'user_id' => auth()->id(),
+        ]);
+    }
+}
+```
+
+```php NotifyUploadCompleted.php
+namespace App\Listeners;
+
+use MrEduar\S3M\Events\MultipartUploadCompleted;
+use App\Models\Upload;
+use App\Notifications\UploadCompleted;
+
+class NotifyUploadCompleted
+{
+    public function handle(MultipartUploadCompleted $event): void
+    {
+        $upload = Upload::where('upload_id', $event->uploadId)->first();
+        
+        if ($upload) {
+            $upload->update([
+                'status' => 'completed',
+                'url' => $event->url,
+            ]);
+            
+            $upload->user->notify(new UploadCompleted($upload));
+        }
+    }
+}
+```
+</CodeGroup>
+
+### Register Listeners
+
+In `app/Providers/EventServiceProvider.php`:
+
+```php
+use MrEduar\S3M\Events\MultipartUploadCreated;
+use MrEduar\S3M\Events\MultipartUploadCompleted;
+use App\Listeners\LogMultipartUploadCreated;
+use App\Listeners\SaveUploadRecord;
+use App\Listeners\NotifyUploadCompleted;
+
+protected $listen = [
+    MultipartUploadCreated::class => [
+        LogMultipartUploadCreated::class,
+        SaveUploadRecord::class,
+    ],
+    MultipartUploadCompleted::class => [
+        NotifyUploadCompleted::class,
+    ],
+];
+```
+
+## Common Use Cases
+
+### Database Tracking
+
+Track all uploads in your database:
+
+```php
+class TrackUpload
+{
+    public function handleCreated(MultipartUploadCreated $event): void
+    {
+        DB::table('uploads')->insert([
+            'uuid' => $event->uuid,
+            'bucket' => $event->bucket,
+            'key' => $event->key,
+            'upload_id' => $event->uploadId,
+            'started_at' => now(),
+            'status' => 'uploading',
+        ]);
+    }
+    
+    public function handleCompleted(MultipartUploadCompleted $event): void
+    {
+        DB::table('uploads')
+            ->where('upload_id', $event->uploadId)
+            ->update([
+                'url' => $event->url,
+                'completed_at' => now(),
+                'status' => 'completed',
+            ]);
+    }
+}
+```
+
+### File Processing
+
+Trigger post-upload processing:
+
+```php
+use App\Jobs\ProcessUploadedFile;
+
+class ProcessFile
+{
+    public function handle(MultipartUploadCompleted $event): void
+    {
+        ProcessUploadedFile::dispatch(
+            $event->bucket,
+            $event->key,
+            $event->url
+        );
+    }
+}
+```
+
+### User Notifications
+
+Notify users when uploads complete:
+
+```php
+use App\Notifications\UploadSuccess;
+use Illuminate\Support\Facades\Notification;
+
+class NotifyUser
+{
+    public function handle(MultipartUploadCompleted $event): void
+    {
+        $user = auth()->user();
+        
+        if ($user) {
+            $user->notify(new UploadSuccess([
+                'filename' => basename($event->key),
+                'url' => $event->url,
+            ]));
+        }
+    }
+}
+```
+
+### Analytics and Metrics
+
+Track upload metrics:
+
+```php
+use Illuminate\Support\Facades\Cache;
+
+class TrackUploadMetrics
+{
+    public function handleCreated(MultipartUploadCreated $event): void
+    {
+        Cache::increment('uploads.started.today');
+        Cache::increment('uploads.started.total');
+    }
+    
+    public function handleCompleted(MultipartUploadCompleted $event): void
+    {
+        Cache::increment('uploads.completed.today');
+        Cache::increment('uploads.completed.total');
+        
+        // Track success rate
+        $started = Cache::get('uploads.started.total', 0);
+        $completed = Cache::get('uploads.completed.total', 0);
+        $successRate = $started > 0 ? ($completed / $started) * 100 : 0;
+        
+        Cache::put('uploads.success_rate', $successRate);
+    }
+}
+```
+
+### Security Auditing
+
+Log uploads for security audits:
+
+```php
+use Illuminate\Support\Facades\Log;
+
+class AuditUpload
+{
+    public function handle(MultipartUploadCreated $event): void
+    {
+        Log::channel('audit')->info('Upload initiated', [
+            'uuid' => $event->uuid,
+            'user_id' => auth()->id(),
+            'ip' => request()->ip(),
+            'bucket' => $event->bucket,
+            'key' => $event->key,
+            'timestamp' => now(),
+        ]);
+    }
+}
+```
+
+## Queued Listeners
+
+For heavy processing, use queued listeners:
+
+```php
+namespace App\Listeners;
+
+use Illuminate\Contracts\Queue\ShouldQueue;
+use MrEduar\S3M\Events\MultipartUploadCompleted;
+
+class ProcessUploadedFile implements ShouldQueue
+{
+    public $queue = 'uploads';
+    
+    public function handle(MultipartUploadCompleted $event): void
+    {
+        // Heavy processing here
+        // This runs in a queue worker
+    }
+}
+```
+
+<Warning>
+  Remember to run queue workers: `php artisan queue:work`
+</Warning>
+
+## Event Subscribers
+
+Group related event listeners:
+
+```php
+namespace App\Listeners;
+
+use Illuminate\Events\Dispatcher;
+use MrEduar\S3M\Events\MultipartUploadCreated;
+use MrEduar\S3M\Events\MultipartUploadCompleted;
+
+class UploadEventSubscriber
+{
+    public function handleUploadCreated(MultipartUploadCreated $event): void
+    {
+        // Handle upload created
+    }
+    
+    public function handleUploadCompleted(MultipartUploadCompleted $event): void
+    {
+        // Handle upload completed
+    }
+    
+    public function subscribe(Dispatcher $events): array
+    {
+        return [
+            MultipartUploadCreated::class => 'handleUploadCreated',
+            MultipartUploadCompleted::class => 'handleUploadCompleted',
+        ];
+    }
+}
+```
+
+Register in `EventServiceProvider`:
+
+```php
+protected $subscribe = [
+    UploadEventSubscriber::class,
+];
+```

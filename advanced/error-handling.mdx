@@ -1,0 +1,495 @@
+---
+title: Error Handling
+description: Handle errors and implement retry logic for multipart uploads
+---
+
+## Automatic Retry Mechanism
+
+S3M includes built-in retry logic for failed chunk uploads on the client side.
+
+### Default Retry Configuration
+
+From `S3M.js:21`:
+
+```javascript
+static DEFAULT_MAX_CHUNK_RETRIES = 3;
+```
+
+### Configure Retries
+
+```javascript
+const uploader = new S3M(file, {
+    chunk_retries: 5, // Retry failed chunks up to 5 times
+});
+```
+
+### How Retries Work
+
+The retry mechanism is implemented in `S3M.js:254-287`:
+
+```javascript
+async uploadChunk(key, uploadId, partNumber, chunk, totalChunks, progress, updateProgress) {
+    const url = await this.getSignUrl(key, uploadId, partNumber);
+
+    const attemptUpload = async (retryCount = 0) => {
+        try {
+            const response = await this.httpClient.put(url, chunk, {
+                headers: { 'Content-Type': this.fileType },
+                onUploadProgress: (event) =>
+                    this.handleUploadProgress(
+                        event,
+                        totalChunks,
+                        partNumber - 1,
+                        progress,
+                        updateProgress,
+                    ),
+            });
+
+            return {
+                ETag: response.headers.etag,
+                PartNumber: partNumber,
+            };
+        } catch (error) {
+            if (retryCount < this.chunkRetries) {
+                console.warn(`Retrying chunk ${partNumber}, attempt ${retryCount + 1}`);
+                return attemptUpload(retryCount + 1);
+            } else {
+                throw error;
+            }
+        }
+    };
+
+    return attemptUpload();
+}
+```
+
+<Info>
+  Failed chunks are automatically retried with exponential backoff. After all retries are exhausted, the error is thrown.
+</Info>
+
+## Client-Side Error Handling
+
+### Basic Error Handling
+
+```javascript
+const uploader = new S3M(file, {
+    chunk_retries: 3,
+});
+
+try {
+    const result = await uploader.upload();
+    console.log('Upload successful:', result);
+} catch (error) {
+    console.error('Upload failed:', error);
+    // Handle the error
+}
+```
+
+### Advanced Error Handling
+
+```javascript
+class UploadManager {
+    async uploadFile(file) {
+        const uploader = new S3M(file, {
+            chunk_retries: 5,
+            progress: (percentage) => {
+                this.updateProgress(percentage);
+            },
+        });
+
+        try {
+            const result = await uploader.upload();
+            this.onUploadSuccess(result);
+            return result;
+        } catch (error) {
+            this.handleUploadError(error);
+            throw error;
+        }
+    }
+
+    handleUploadError(error) {
+        if (error.response) {
+            // Server responded with error
+            const status = error.response.status;
+            const message = error.response.data.error;
+
+            switch (status) {
+                case 401:
+                    this.showError('Authentication failed. Please log in again.');
+                    break;
+                case 403:
+                    this.showError('You do not have permission to upload files.');
+                    break;
+                case 500:
+                    this.showError(`Server error: ${message}`);
+                    break;
+                default:
+                    this.showError(`Upload failed: ${message}`);
+            }
+        } else if (error.request) {
+            // Request made but no response
+            this.showError('Network error. Please check your connection.');
+        } else {
+            // Other errors
+            this.showError(`Upload failed: ${error.message}`);
+        }
+    }
+
+    showError(message) {
+        // Display error to user
+        console.error(message);
+        alert(message);
+    }
+
+    updateProgress(percentage) {
+        // Update UI
+        console.log(`Upload progress: ${percentage}%`);
+    }
+
+    onUploadSuccess(result) {
+        console.log('File uploaded successfully:', result.url);
+    }
+}
+```
+
+## Server-Side Error Responses
+
+### Controller Error Handling
+
+All controller methods return JSON error responses (from `S3MultipartController.php`):
+
+#### Create Multipart Upload Error
+
+```php
+// S3MultipartController.php:58-62
+catch (Exception $e) {
+    return response()->json([
+        'error' => $e->getMessage(),
+    ], 500);
+}
+```
+
+#### Sign Part Upload Error
+
+```php
+// S3MultipartController.php:92-96
+catch (Exception $e) {
+    return response()->json([
+        'error' => $e->getMessage(),
+    ], 500);
+}
+```
+
+#### Complete Multipart Upload Error
+
+```php
+// S3MultipartController.php:118-122
+catch (Exception $e) {
+    return response()->json([
+        'error' => $e->getMessage(),
+    ], 500);
+}
+```
+
+### Custom Error Responses
+
+```php
+use MrEduar\S3M\Http\Controllers\S3MultipartController;
+use Illuminate\Http\JsonResponse;
+use Exception;
+
+class CustomS3MultipartController extends S3MultipartController
+{
+    public function createMultipartUpload(CreateMultipartUploadRequest $request): JsonResponse
+    {
+        try {
+            return parent::createMultipartUpload($request);
+        } catch (Exception $e) {
+            return $this->handleError($e, 'Failed to create multipart upload');
+        }
+    }
+
+    protected function handleError(Exception $e, string $message): JsonResponse
+    {
+        \Log::error($message, [
+            'exception' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+            'user_id' => auth()->id(),
+        ]);
+
+        return response()->json([
+            'error' => $message,
+            'message' => config('app.debug') ? $e->getMessage() : 'An error occurred',
+            'code' => $e->getCode(),
+        ], 500);
+    }
+}
+```
+
+## Handling Failed Uploads
+
+### Detect Failed Uploads
+
+```javascript
+let uploadAttempts = 0;
+const maxAttempts = 3;
+
+async function uploadWithRetry(file) {
+    while (uploadAttempts < maxAttempts) {
+        try {
+            const uploader = new S3M(file, {
+                chunk_retries: 3,
+            });
+
+            const result = await uploader.upload();
+            console.log('Upload successful:', result);
+            return result;
+        } catch (error) {
+            uploadAttempts++;
+            console.error(`Upload attempt ${uploadAttempts} failed:`, error);
+
+            if (uploadAttempts >= maxAttempts) {
+                throw new Error('Upload failed after maximum retries');
+            }
+
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, 2000 * uploadAttempts));
+        }
+    }
+}
+```
+
+### Resume Failed Uploads
+
+```javascript
+class ResumableUpload {
+    constructor(file, options = {}) {
+        this.file = file;
+        this.options = options;
+        this.uploadState = this.loadState();
+    }
+
+    async upload() {
+        try {
+            if (this.uploadState) {
+                // Resume existing upload
+                return await this.resumeUpload();
+            } else {
+                // Start new upload
+                return await this.startNewUpload();
+            }
+        } catch (error) {
+            this.saveState();
+            throw error;
+        }
+    }
+
+    async startNewUpload() {
+        const uploader = new S3M(this.file, {
+            ...this.options,
+            auto_complete: false, // Don't auto-complete
+        });
+
+        const result = await uploader.upload();
+        this.uploadState = result;
+        this.saveState();
+
+        return this.completeUpload(result);
+    }
+
+    async resumeUpload() {
+        // Continue with existing upload_id and parts
+        const uploader = new S3M(this.file, this.options);
+        // Resume logic here
+    }
+
+    async completeUpload(uploadData) {
+        const response = await axios.post('/s3m/complete-multipart-upload', {
+            key: uploadData.key,
+            upload_id: uploadData.upload_id,
+            parts: uploadData.parts,
+        });
+
+        this.clearState();
+        return response.data;
+    }
+
+    saveState() {
+        localStorage.setItem(`upload_${this.file.name}`, JSON.stringify(this.uploadState));
+    }
+
+    loadState() {
+        const state = localStorage.getItem(`upload_${this.file.name}`);
+        return state ? JSON.parse(state) : null;
+    }
+
+    clearState() {
+        localStorage.removeItem(`upload_${this.file.name}`);
+    }
+}
+```
+
+## Error Types and Solutions
+
+<Accordion title="Network Errors">
+  **Symptoms:** Request timeout, connection refused
+
+  **Solutions:**
+  - Increase chunk retry count
+  - Reduce chunk size for slow connections
+  - Implement exponential backoff
+  - Check network connectivity
+
+  ```javascript
+  const uploader = new S3M(file, {
+      chunk_size: 5 * 1024 * 1024, // 5MB chunks for slow networks
+      chunk_retries: 5,
+      max_concurrent_uploads: 2, // Reduce concurrent uploads
+  });
+  ```
+</Accordion>
+
+<Accordion title="Authentication Errors (401)">
+  **Symptoms:** Unauthorized, invalid credentials
+
+  **Solutions:**
+  - Verify AWS credentials in `.env`
+  - Check IAM permissions
+  - Ensure session hasn't expired
+  - Verify middleware authentication
+
+  ```php
+  // Check AWS credentials
+  's3' => [
+      'key' => env('AWS_ACCESS_KEY_ID'),
+      'secret' => env('AWS_SECRET_ACCESS_KEY'),
+      'region' => env('AWS_DEFAULT_REGION'),
+  ],
+  ```
+</Accordion>
+
+<Accordion title="Permission Errors (403)">
+  **Symptoms:** Forbidden, access denied
+
+  **Solutions:**
+  - Verify IAM user has S3 permissions
+  - Check bucket policy
+  - Verify ACL settings
+  - Ensure bucket exists
+
+  Required IAM permissions:
+  ```json
+  {
+      "Version": "2012-10-17",
+      "Statement": [
+          {
+              "Effect": "Allow",
+              "Action": [
+                  "s3:PutObject",
+                  "s3:PutObjectAcl",
+                  "s3:AbortMultipartUpload",
+                  "s3:ListMultipartUploadParts"
+              ],
+              "Resource": "arn:aws:s3:::your-bucket/*"
+          }
+      ]
+  }
+  ```
+</Accordion>
+
+<Accordion title="Server Errors (500)">
+  **Symptoms:** Internal server error
+
+  **Solutions:**
+  - Check Laravel logs: `storage/logs/laravel.log`
+  - Verify S3 configuration
+  - Check AWS service status
+  - Review custom controller logic
+
+  ```bash
+  # View logs
+  tail -f storage/logs/laravel.log
+  ```
+</Accordion>
+
+<Accordion title="Invalid Upload ID">
+  **Symptoms:** NoSuchUpload error
+
+  **Solutions:**
+  - Upload ID expired (24 hours)
+  - Start a new upload
+  - Don't reuse old upload IDs
+
+  ```javascript
+  // Always start fresh upload
+  const uploader = new S3M(file);
+  const result = await uploader.upload();
+  ```
+</Accordion>
+
+## Logging Errors
+
+### Client-Side Logging
+
+```javascript
+class ErrorLogger {
+    static log(error, context = {}) {
+        const errorData = {
+            message: error.message,
+            stack: error.stack,
+            context,
+            timestamp: new Date().toISOString(),
+        };
+
+        // Send to logging service
+        fetch('/api/log-error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(errorData),
+        });
+
+        console.error('Upload error:', errorData);
+    }
+}
+
+// Usage
+try {
+    await uploader.upload();
+} catch (error) {
+    ErrorLogger.log(error, {
+        filename: file.name,
+        filesize: file.size,
+        userId: currentUser.id,
+    });
+}
+```
+
+### Server-Side Logging
+
+```php
+use Illuminate\Support\Facades\Log;
+
+class S3MultipartController extends Controller
+{
+    public function createMultipartUpload(CreateMultipartUploadRequest $request): JsonResponse
+    {
+        try {
+            // ... upload logic
+        } catch (Exception $e) {
+            Log::error('Multipart upload creation failed', [
+                'error' => $e->getMessage(),
+                'user_id' => auth()->id(),
+                'filename' => $request->input('filename'),
+                'bucket' => $request->input('bucket'),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+}
+```
+
+<Warning>
+  Always log errors for debugging, but avoid exposing sensitive information in error messages returned to clients.
+</Warning>

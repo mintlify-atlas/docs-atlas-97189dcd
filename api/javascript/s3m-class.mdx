@@ -1,0 +1,115 @@
+---
+title: 'S3M Class'
+description: 'JavaScript S3M class for handling multipart uploads to AWS S3'
+---
+
+## Overview
+
+The `S3M` class is the core JavaScript class that handles multipart file uploads to AWS S3. It manages chunking, concurrent uploads, retry logic, and progress tracking.
+
+## Constructor
+
+```javascript
+const uploader = new S3M(file, options);
+```
+
+<ParamField path="file" type="File" required>
+  The File object to upload. This is a standard browser File object.
+</ParamField>
+
+<ParamField path="options" type="Object">
+  Configuration options for the upload. See the [Options](/api/javascript/options) page for details.
+</ParamField>
+
+## Class Constants
+
+The S3M class defines several default constants that control upload behavior:
+
+<ResponseField name="DEFAULT_CHUNK_SIZE" type="number" default="10485760">
+  Default chunk size in bytes (10MB). This is the size of each part in the multipart upload.
+  
+  ```javascript
+  S3M.DEFAULT_CHUNK_SIZE // 10 * 1024 * 1024 = 10MB
+  ```
+</ResponseField>
+
+<ResponseField name="DEFAULT_MAX_CONCURRENT_UPLOADS" type="number" default="5">
+  Maximum number of chunks that can be uploaded concurrently.
+  
+  ```javascript
+  S3M.DEFAULT_MAX_CONCURRENT_UPLOADS // 5
+  ```
+</ResponseField>
+
+<ResponseField name="DEFAULT_MAX_CHUNK_RETRIES" type="number" default="3">
+  Maximum number of retry attempts for a failed chunk upload.
+  
+  ```javascript
+  S3M.DEFAULT_MAX_CHUNK_RETRIES // 3
+  ```
+</ResponseField>
+
+## Instance Properties
+
+After instantiation, the S3M instance has the following properties:
+
+<ResponseField name="file" type="File">
+  The File object being uploaded.
+</ResponseField>
+
+<ResponseField name="options" type="Object">
+  The options object passed to the constructor.
+</ResponseField>
+
+<ResponseField name="chunkSize" type="number">
+  The chunk size for the upload. Defaults to `DEFAULT_CHUNK_SIZE` if not specified in options.
+</ResponseField>
+
+<ResponseField name="maxConcurrentUploads" type="number">
+  Maximum number of concurrent chunk uploads. Defaults to `DEFAULT_MAX_CONCURRENT_UPLOADS` if not specified.
+</ResponseField>
+
+<ResponseField name="fileName" type="string">
+  The name of the file being uploaded (from `file.name`).
+</ResponseField>
+
+<ResponseField name="fileSize" type="number">
+  The size of the file in bytes (from `file.size`).
+</ResponseField>
+
+<ResponseField name="fileType" type="string">
+  The MIME type of the file (from `file.type`).
+</ResponseField>
+
+<ResponseField name="httpClient" type="Object">
+  The HTTP client used for requests. Defaults to axios if not provided in options.
+</ResponseField>
+
+<ResponseField name="chunkRetries" type="number">
+  Maximum number of retries for failed chunks. Defaults to `DEFAULT_MAX_CHUNK_RETRIES` if not specified.
+</ResponseField>
+
+## Example Usage
+
+```javascript
+import S3M from '@savannabits/s3m';
+
+// Create an instance
+const file = document.getElementById('file-input').files[0];
+const uploader = new S3M(file, {
+  chunk_size: 5 * 1024 * 1024, // 5MB chunks
+  max_concurrent_uploads: 3,
+  progress: (percent) => {
+    console.log(`Upload progress: ${percent}%`);
+  }
+});
+
+// Start the upload
+const result = await uploader.upload();
+console.log('Upload complete:', result);
+```
+
+## Related
+
+- [Options Reference](/api/javascript/options)
+- [Methods Reference](/api/javascript/methods)

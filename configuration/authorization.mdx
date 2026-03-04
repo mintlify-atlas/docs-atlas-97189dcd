@@ -1,0 +1,303 @@
+---
+title: 'Authorization'
+description: 'Configure policy-based authorization for file uploads'
+---
+
+## Overview
+
+Before initiating an upload directly to S3, S3M performs an authorization check against the currently authenticated user using Laravel's policy system. This ensures only authorized users can upload files to your S3 bucket.
+
+## How Authorization Works
+
+S3M's internal signed storage URL generator performs an authorization check before:
+
+1. Creating a multipart upload session
+2. Generating presigned URLs for part uploads
+3. Completing the multipart upload
+
+The authorization is handled through a policy method that you define on your User model.
+
+## Setting Up Authorization
+
+<Steps>
+  <Step title="Create User Policy">
+    If you don't already have a `UserPolicy`, create one using the Artisan command:
+
+    ```bash
+    php artisan make:policy UserPolicy --model=User
+    ```
+
+    This creates a new policy class at `app/Policies/UserPolicy.php`.
+  </Step>
+
+  <Step title="Add uploadFiles Method">
+    Add the `uploadFiles` method to your `UserPolicy` class:
+
+    <CodeGroup>
+    ```php app/Policies/UserPolicy.php
+    <?php
+
+    namespace App\Policies;
+
+    use App\Models\User;
+    use Illuminate\Auth\Access\HandlesAuthorization;
+
+    class UserPolicy
+    {
+        use HandlesAuthorization;
+
+        /**
+         * Determine whether the user can upload files.
+         *
+         * @param  \App\Models\User  $user
+         * @return mixed
+         */
+        public function uploadFiles(User $user)
+        {
+            return true;
+        }
+    }
+    ```
+    </CodeGroup>
+
+    <Info>
+      This basic implementation allows all authenticated users to upload files. See the customization section below for more advanced authorization logic.
+    </Info>
+  </Step>
+
+  <Step title="Register Policy (if needed)">
+    Laravel auto-discovers policies, but if needed, register it in `AuthServiceProvider`:
+
+    ```php app/Providers/AuthServiceProvider.php
+    protected $policies = [
+        User::class => UserPolicy::class,
+    ];
+    ```
+  </Step>
+</Steps>
+
+## Customizing Authorization
+
+The `uploadFiles` method gives you complete control over who can upload files. Here are common authorization patterns:
+
+### Role-Based Authorization
+
+Allow only users with specific roles to upload:
+
+```php
+public function uploadFiles(User $user)
+{
+    return $user->hasRole('editor') || $user->hasRole('admin');
+}
+```
+
+### Subscription-Based Authorization
+
+Restrict uploads to users with active subscriptions:
+
+```php
+public function uploadFiles(User $user)
+{
+    return $user->subscribed('default');
+}
+```
+
+### Storage Quota Authorization
+
+Limit uploads based on user storage quota:
+
+```php
+public function uploadFiles(User $user)
+{
+    $usedStorage = $user->files()->sum('size');
+    $quota = $user->storage_quota ?? 1073741824; // 1GB default
+    
+    return $usedStorage < $quota;
+}
+```
+
+### Email Verification Required
+
+Require email verification before allowing uploads:
+
+```php
+public function uploadFiles(User $user)
+{
+    return $user->hasVerifiedEmail();
+}
+```
+
+### Complex Authorization Logic
+
+Combine multiple conditions:
+
+```php
+public function uploadFiles(User $user)
+{
+    // User must be verified, not banned, and have available storage
+    if (!$user->hasVerifiedEmail()) {
+        return false;
+    }
+    
+    if ($user->is_banned) {
+        return false;
+    }
+    
+    $usedStorage = $user->files()->sum('size');
+    $maxStorage = $user->max_storage_bytes;
+    
+    return $usedStorage < $maxStorage;
+}
+```
+
+## Authorization Response
+
+The `uploadFiles` method should return:
+
+- `true` - Allow the upload
+- `false` - Deny the upload
+- `Response` - Return a custom response (optional)
+
+### Custom Response Example
+
+```php
+use Illuminate\Auth\Access\Response;
+
+public function uploadFiles(User $user)
+{
+    if (!$user->hasVerifiedEmail()) {
+        return Response::deny('You must verify your email before uploading files.');
+    }
+    
+    return Response::allow();
+}
+```
+
+## Middleware Integration
+
+S3M routes automatically use the middleware defined in `config/s3m.php`. Ensure authentication middleware is included:
+
+```php config/s3m.php
+'middleware' => [
+    'web',
+    'auth', // Ensure user is authenticated
+],
+```
+
+<Warning>
+  Without authentication middleware, the authorization policy cannot access the authenticated user and uploads will be denied.
+</Warning>
+
+## Testing Authorization
+
+Test your authorization policy using Laravel's policy testing features:
+
+```php tests/Feature/UploadAuthorizationTest.php
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class UploadAuthorizationTest extends TestCase
+{
+    use RefreshDatabase;
+    
+    public function test_verified_users_can_upload()
+    {
+        $user = User::factory()->create([
+            'email_verified_at' => now(),
+        ]);
+        
+        $this->assertTrue($user->can('uploadFiles', User::class));
+    }
+    
+    public function test_unverified_users_cannot_upload()
+    {
+        $user = User::factory()->create([
+            'email_verified_at' => null,
+        ]);
+        
+        $this->assertFalse($user->can('uploadFiles', User::class));
+    }
+}
+```
+
+## Controller Implementation
+
+The authorization check is automatically performed in the S3MultipartController:
+
+```php src/Http/Controllers/S3MultipartController.php
+public function __construct()
+{
+    $this->middleware(config('s3m.middleware'));
+}
+
+public function createMultipartUpload(CreateMultipartUploadRequest $request): JsonResponse
+{
+    S3M::ensureConfigureVariablesAreAvailable($request->only('bucket'));
+    
+    // Authorization check happens here via middleware and policy
+    
+    $client = S3M::storageClient();
+    // ...
+}
+```
+
+## Best Practices
+
+<Note>
+  **Security Recommendations:**
+  
+  - Always require authentication for file uploads
+  - Implement rate limiting to prevent abuse
+  - Validate file types and sizes on the server
+  - Use email verification for user accounts
+  - Monitor storage usage and set quotas
+  - Log upload activities for audit trails
+</Note>
+
+## Handling Authorization Failures
+
+When authorization fails, S3M returns an HTTP 403 Forbidden response. Handle this in your frontend:
+
+```javascript
+s3m(file, {
+    progress: progress => {
+        uploadProgress.value = progress;
+    }
+}).then((response) => {
+    // Upload successful
+    console.log('Upload complete:', response);
+}).catch((error) => {
+    if (error.response?.status === 403) {
+        alert('You are not authorized to upload files.');
+    } else {
+        alert('Upload failed: ' + error.message);
+    }
+});
+```
+
+## Advanced: Custom Authorization Per Upload
+
+For more granular control, you can extend the policy to check specific upload parameters:
+
+```php
+public function uploadFiles(User $user, ?string $bucket = null, ?string $folder = null)
+{
+    // Only allow uploads to user's personal folder
+    if ($folder && !str_starts_with($folder, "users/{$user->id}/")) {
+        return false;
+    }
+    
+    // Only allow uploads to specific buckets
+    $allowedBuckets = ['user-uploads', 'public-files'];
+    if ($bucket && !in_array($bucket, $allowedBuckets)) {
+        return false;
+    }
+    
+    return true;
+}
+```
+
+<Info>
+  The `uploadFiles` policy method is the gatekeeper for all S3M uploads. Customize it to match your application's security requirements.
+</Info>

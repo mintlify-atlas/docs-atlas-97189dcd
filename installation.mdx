@@ -1,0 +1,312 @@
+---
+title: Installation
+description: Install and configure S3M in your Laravel application with Composer, publish the config file, and set up your AWS credentials.
+---
+
+## Requirements
+
+Before installing S3M, ensure your environment meets these requirements:
+
+<CardGroup cols={2}>
+  <Card title="PHP Version" icon="php">
+    PHP 8.1 or higher
+  </Card>
+  <Card title="Laravel Version" icon="laravel">
+    Laravel 10.x, 11.x, or 12.x
+  </Card>
+  <Card title="AWS SDK" icon="aws">
+    Automatically installed as dependency
+  </Card>
+  <Card title="AWS Account" icon="cloud">
+    Active AWS account with S3 access
+  </Card>
+</CardGroup>
+
+## Install via Composer
+
+<Steps>
+  <Step title="Install the Package">
+    Install S3M using Composer:
+
+    ```bash
+    composer require mreduar/s3m
+    ```
+
+    <Info>
+      The package will automatically register its service provider thanks to Laravel's package auto-discovery.
+    </Info>
+  </Step>
+
+  <Step title="Publish Configuration File">
+    Publish the configuration file to customize S3M's settings:
+
+    ```bash
+    php artisan vendor:publish --provider="MrEduar\S3M\S3MServiceProvider"
+    ```
+
+    This creates `config/s3m.php` in your project with the following default settings:
+
+    ```php config/s3m.php
+    <?php
+
+    return [
+        /**
+         * Indicates whether the bucket of the uploaded file can be changed.
+         * The default bucket is the one configured below.
+         */
+        'allow_change_bucket' => true,
+
+        /**
+         * Indicates whether the visibility of the uploaded file can be modified.
+         * The default visibility setting is private.
+         */
+        'allow_change_visibility' => true,
+
+        /**
+         * Indicates whether the folder of the uploaded file can be changed.
+         * By default, files are stored in the /tmp/ directory at the root of the bucket,
+         * following the format /tmp/{filename}, where {filename} is the UUID generated for the upload.
+         */
+        'allow_change_folder' => false,
+
+        /**
+         * Middleware to be used for the multipart upload.
+         */
+        'middleware' => [
+            'web',
+        ],
+
+        /**
+         * S3 configuration.
+         */
+        's3' => [
+            'key' => env('AWS_ACCESS_KEY_ID'),
+            'secret' => env('AWS_SECRET_ACCESS_KEY'),
+            'token' => env('AWS_SESSION_TOKEN'),
+            'region' => env('AWS_DEFAULT_REGION'),
+            'bucket' => env('AWS_BUCKET'),
+            'url' => env('AWS_URL'),
+            'endpoint' => env('AWS_ENDPOINT'),
+            'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+        ],
+    ];
+    ```
+  </Step>
+
+  <Step title="Add Blade Directive">
+    Add the `@s3m` Blade directive to your main layout file **before** your application's JavaScript:
+
+    ```blade resources/views/layouts/app.blade.php
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>My App</title>
+        <!-- Your CSS -->
+    </head>
+    <body>
+        <div id="app">
+            <!-- Your content -->
+        </div>
+
+        <!-- S3M JavaScript (must come first) -->
+        @s3m
+
+        <!-- Your application JavaScript -->
+        <script src="{{ mix('js/app.js') }}"></script>
+    </body>
+    </html>
+    ```
+
+    <Info>
+      The `@s3m` directive makes the global `s3m()` helper function available in your frontend JavaScript.
+    </Info>
+  </Step>
+</Steps>
+
+## Configure AWS Credentials
+
+Add your AWS credentials to your `.env` file:
+
+```bash .env
+# AWS S3 Configuration
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+AWS_DEFAULT_REGION=us-east-1
+AWS_BUCKET=your-bucket-name
+
+# Optional: For custom endpoints (MinIO, DigitalOcean Spaces, etc.)
+# AWS_ENDPOINT=https://your-custom-endpoint.com
+# AWS_URL=https://your-bucket-url.com
+# AWS_USE_PATH_STYLE_ENDPOINT=false
+
+# Optional: For temporary credentials
+# AWS_SESSION_TOKEN=your-session-token
+```
+
+<Warning>
+  Never commit your `.env` file to version control. Add it to your `.gitignore` to keep credentials secure.
+</Warning>
+
+## Configure S3 Bucket
+
+Your S3 bucket needs proper CORS configuration to allow browser uploads:
+
+<Tabs>
+  <Tab title="AWS Console">
+    1. Go to your S3 bucket in the AWS Console
+    2. Navigate to **Permissions** → **CORS configuration**
+    3. Add the following CORS rule:
+
+    ```json
+    [
+        {
+            "AllowedHeaders": ["*"],
+            "AllowedMethods": ["GET", "PUT", "POST", "DELETE"],
+            "AllowedOrigins": ["https://your-domain.com"],
+            "ExposeHeaders": ["ETag"]
+        }
+    ]
+    ```
+  </Tab>
+
+  <Tab title="AWS CLI">
+    Create a `cors.json` file:
+
+    ```json cors.json
+    {
+        "CORSRules": [
+            {
+                "AllowedHeaders": ["*"],
+                "AllowedMethods": ["GET", "PUT", "POST", "DELETE"],
+                "AllowedOrigins": ["https://your-domain.com"],
+                "ExposeHeaders": ["ETag"]
+            }
+        ]
+    }
+    ```
+
+    Then apply it:
+
+    ```bash
+    aws s3api put-bucket-cors --bucket your-bucket-name --cors-configuration file://cors.json
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  The `ETag` header must be exposed in your CORS configuration for multipart uploads to work correctly.
+</Warning>
+
+## Configure Lifecycle Rules (Recommended)
+
+S3M stores files temporarily in a `tmp/` directory. Configure S3 lifecycle rules to automatically delete old temporary files:
+
+<Tabs>
+  <Tab title="AWS Console">
+    1. Go to your S3 bucket in the AWS Console
+    2. Navigate to **Management** → **Lifecycle rules**
+    3. Create a new rule:
+       - **Rule name**: `Delete tmp files`
+       - **Prefix**: `tmp/`
+       - **Action**: Delete expired objects
+       - **Days after creation**: `1`
+  </Tab>
+
+  <Tab title="AWS CLI">
+    Create a `lifecycle.json` file:
+
+    ```json lifecycle.json
+    {
+        "Rules": [
+            {
+                "Id": "DeleteTmpFiles",
+                "Status": "Enabled",
+                "Prefix": "tmp/",
+                "Expiration": {
+                    "Days": 1
+                }
+            }
+        ]
+    }
+    ```
+
+    Then apply it:
+
+    ```bash
+    aws s3api put-bucket-lifecycle-configuration --bucket your-bucket-name --lifecycle-configuration file://lifecycle.json
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  Setting a 24-hour expiration on the `tmp/` directory automatically cleans up abandoned uploads (e.g., when users start an upload but don't complete it).
+</Tip>
+
+## Configuration Options
+
+### Bucket Control
+
+```php config/s3m.php
+'allow_change_bucket' => true,
+```
+
+When `true`, allows frontend code to specify a different bucket than the default. Set to `false` to enforce using only the configured bucket.
+
+### Visibility Control
+
+```php config/s3m.php
+'allow_change_visibility' => true,
+```
+
+When `true`, allows frontend code to set file visibility (e.g., `public-read`). Files are private by default.
+
+### Folder Control
+
+```php config/s3m.php
+'allow_change_folder' => false,
+```
+
+When `true`, allows frontend code to specify custom folder paths. By default, all files go to `tmp/{uuid}`.
+
+### Middleware
+
+```php config/s3m.php
+'middleware' => ['web'],
+```
+
+Specify middleware groups to apply to S3M routes. Add `auth` to require authentication:
+
+```php
+'middleware' => ['web', 'auth'],
+```
+
+## Verify Installation
+
+Check that S3M is properly installed:
+
+```bash
+php artisan route:list --name=s3m
+```
+
+You should see three routes:
+
+```
+POST      s3m/create-multipart-upload
+POST      s3m/create-sign-part
+POST      s3m/complete-multipart-upload
+```
+
+<Info>
+  These routes are automatically registered by S3M and used by the JavaScript library to handle uploads.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Learn how to implement your first multipart upload
+  </Card>
+  <Card title="Authorization" icon="shield" href="/configuration/authorization">
+    Set up authorization policies to control who can upload files
+  </Card>
+</CardGroup>

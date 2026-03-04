@@ -1,0 +1,321 @@
+---
+title: Configuration Reference
+description: Complete reference for S3M configuration options
+---
+
+S3M is configured via the `config/s3m.php` file. This reference documents all available configuration options.
+
+## Configuration File
+
+The configuration file is published to your Laravel application at `config/s3m.php` when you run:
+
+```bash
+php artisan vendor:publish --tag=s3m-config
+```
+
+## Upload Behavior
+
+### allow_change_bucket
+
+<ParamField path="allow_change_bucket" type="boolean" default="true">
+  Controls whether clients can specify a custom S3 bucket when creating uploads.
+  
+  - When `true`: Clients can pass a `bucket` parameter to override the default bucket
+  - When `false`: All uploads use the default bucket configured in `s3.bucket`
+  
+  **Security Note:** Set to `false` in production if you want to restrict uploads to a single bucket.
+</ParamField>
+
+**Example:**
+
+```php config/s3m.php
+'allow_change_bucket' => env('S3M_ALLOW_CHANGE_BUCKET', false),
+```
+
+### allow_change_visibility
+
+<ParamField path="allow_change_visibility" type="boolean" default="true">
+  Controls whether clients can specify custom ACL visibility (public/private) for uploads.
+  
+  - When `true`: Clients can pass a `visibility` parameter (e.g., `public-read`, `private`)
+  - When `false`: All uploads use the default visibility of `private`
+  
+  **Default Visibility:** `private` (see S3MultipartController.php:166)
+</ParamField>
+
+**Example:**
+
+```php config/s3m.php
+'allow_change_visibility' => env('S3M_ALLOW_CHANGE_VISIBILITY', false),
+```
+
+### allow_change_folder
+
+<ParamField path="allow_change_folder" type="boolean" default="false">
+  Controls whether clients can specify a custom folder/prefix for S3 object keys.
+  
+  - When `true`: Clients can pass a `folder` parameter to customize the upload path
+  - When `false`: All uploads are stored in the `/tmp/` directory
+  
+  **Default Path Format:** `/tmp/{uuid}` where `{uuid}` is auto-generated
+  
+  **Custom Path Example:** When enabled, client can specify `folder: "uploads/documents"` to store at `/uploads/documents/{uuid}`
+</ParamField>
+
+**Example:**
+
+```php config/s3m.php
+'allow_change_folder' => env('S3M_ALLOW_CHANGE_FOLDER', true),
+```
+
+<Note>
+  Disabling `allow_change_folder` is recommended for security to prevent path traversal attacks and ensure consistent file organization.
+</Note>
+
+## Middleware
+
+### middleware
+
+<ParamField path="middleware" type="array" default="['web']">
+  Array of middleware to apply to all S3M routes (multipart creation, signing, completion).
+  
+  **Common Middleware:**
+  - `web`: Session, CSRF protection, cookies
+  - `auth`: Require authenticated users
+  - `auth:sanctum`: API token authentication
+  - Custom middleware for rate limiting, logging, etc.
+</ParamField>
+
+**Examples:**
+
+<CodeGroup>
+```php Web Application (Default)
+'middleware' => [
+    'web',
+],
+```
+
+```php Authenticated Users Only
+'middleware' => [
+    'web',
+    'auth',
+],
+```
+
+```php API with Sanctum
+'middleware' => [
+    'auth:sanctum',
+    'throttle:uploads',
+],
+```
+
+```php Custom Middleware
+'middleware' => [
+    'web',
+    'auth',
+    \App\Http\Middleware\LogUploads::class,
+    \App\Http\Middleware\CheckUploadQuota::class,
+],
+```
+</CodeGroup>
+
+<Note>
+  Middleware is applied in the controller constructor (see S3MultipartController.php:24)
+</Note>
+
+## S3 Credentials
+
+### s3
+
+<ParamField path="s3" type="array" required>
+  AWS S3 connection configuration. All credentials are read from environment variables by default.
+</ParamField>
+
+#### s3.key
+
+<ParamField path="s3.key" type="string" required>
+  AWS Access Key ID for S3 authentication.
+  
+  **Environment Variable:** `AWS_ACCESS_KEY_ID`
+</ParamField>
+
+#### s3.secret
+
+<ParamField path="s3.secret" type="string" required>
+  AWS Secret Access Key for S3 authentication.
+  
+  **Environment Variable:** `AWS_SECRET_ACCESS_KEY`
+</ParamField>
+
+#### s3.token
+
+<ParamField path="s3.token" type="string">
+  AWS Session Token for temporary credentials (optional).
+  
+  **Environment Variable:** `AWS_SESSION_TOKEN`
+  
+  **Use Case:** Required when using IAM role temporary credentials or STS assumed roles.
+</ParamField>
+
+#### s3.region
+
+<ParamField path="s3.region" type="string" required>
+  AWS region where your S3 bucket is located.
+  
+  **Environment Variable:** `AWS_DEFAULT_REGION`
+  
+  **Examples:** `us-east-1`, `eu-west-1`, `ap-southeast-1`
+</ParamField>
+
+#### s3.bucket
+
+<ParamField path="s3.bucket" type="string" required>
+  Default S3 bucket name for uploads.
+  
+  **Environment Variable:** `AWS_BUCKET`
+  
+  **Note:** Can be overridden per-upload if `allow_change_bucket` is `true`.
+</ParamField>
+
+#### s3.url
+
+<ParamField path="s3.url" type="string">
+  Custom S3 URL for accessing uploaded files (optional).
+  
+  **Environment Variable:** `AWS_URL`
+  
+  **Use Case:** CloudFront distribution URL or custom domain for S3 assets.
+</ParamField>
+
+#### s3.endpoint
+
+<ParamField path="s3.endpoint" type="string">
+  Custom S3 endpoint URL (optional).
+  
+  **Environment Variable:** `AWS_ENDPOINT`
+  
+  **Use Case:** S3-compatible services like MinIO, DigitalOcean Spaces, Wasabi, etc.
+  
+  **Example:** `https://nyc3.digitaloceanspaces.com`
+</ParamField>
+
+#### s3.use_path_style_endpoint
+
+<ParamField path="s3.use_path_style_endpoint" type="boolean" default="false">
+  Use path-style S3 URLs instead of virtual-hosted-style.
+  
+  **Environment Variable:** `AWS_USE_PATH_STYLE_ENDPOINT`
+  
+  - `false`: Virtual-hosted style (default): `https://bucket-name.s3.region.amazonaws.com/key`
+  - `true`: Path style: `https://s3.region.amazonaws.com/bucket-name/key`
+  
+  **Use Case:** Required for some S3-compatible services like MinIO.
+</ParamField>
+
+## Complete Configuration Example
+
+<CodeGroup>
+```php config/s3m.php
+<?php
+
+return [
+    /**
+     * Indicates whether the bucket of the uploaded file can be changed.
+     * The default bucket is the one configured below.
+     */
+    'allow_change_bucket' => true,
+
+    /**
+     * Indicates whether the visibility of the uploaded file can be modified.
+     * The default visibility setting is private.
+     */
+    'allow_change_visibility' => true,
+
+    /**
+     * Indicates whether the folder of the uploaded file can be changed.
+     * By default, files are stored in the /tmp/ directory at the root of the bucket,
+     * following the format /tmp/{filename}, where {filename} is the UUID generated for the upload.
+     */
+    'allow_change_folder' => false,
+
+    /**
+     * Middleware to be used for the multipart upload.
+     */
+    'middleware' => [
+        'web',
+    ],
+
+    /**
+     * S3 configuration.
+     */
+    's3' => [
+        'key' => env('AWS_ACCESS_KEY_ID'),
+        'secret' => env('AWS_SECRET_ACCESS_KEY'),
+        'token' => env('AWS_SESSION_TOKEN'),
+        'region' => env('AWS_DEFAULT_REGION'),
+        'bucket' => env('AWS_BUCKET'),
+        'url' => env('AWS_URL'),
+        'endpoint' => env('AWS_ENDPOINT'),
+        'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+    ],
+];
+```
+
+```bash .env
+# Required
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+AWS_DEFAULT_REGION=us-east-1
+AWS_BUCKET=your-bucket-name
+
+# Optional
+AWS_SESSION_TOKEN=
+AWS_URL=https://cdn.example.com
+AWS_ENDPOINT=
+AWS_USE_PATH_STYLE_ENDPOINT=false
+
+# S3M Behavior (optional)
+S3M_ALLOW_CHANGE_BUCKET=false
+S3M_ALLOW_CHANGE_VISIBILITY=false
+S3M_ALLOW_CHANGE_FOLDER=false
+```
+</CodeGroup>
+
+## Security Best Practices
+
+<Accordion title="Production Configuration">
+  **Recommended production settings:**
+  ```php
+  'allow_change_bucket' => false,
+  'allow_change_visibility' => false,
+  'allow_change_folder' => false,
+  'middleware' => ['web', 'auth'],
+  ```
+  This prevents clients from manipulating upload destinations and requires authentication.
+</Accordion>
+
+<Accordion title="IAM Permissions">
+  Ensure your AWS IAM user/role has these S3 permissions:
+  - `s3:PutObject`
+  - `s3:GetObject` (for presigned URLs)
+  - `s3:CreateMultipartUpload`
+  - `s3:UploadPart`
+  - `s3:CompleteMultipartUpload`
+  - `s3:AbortMultipartUpload`
+</Accordion>
+
+<Accordion title="Environment Variables">
+  Never commit AWS credentials to version control. Always use environment variables and ensure `.env` is in `.gitignore`.
+</Accordion>
+
+<Accordion title="CORS Configuration">
+  If uploading from browser, configure S3 bucket CORS to allow PUT requests from your domain:
+  ```json
+  {
+    "AllowedOrigins": ["https://your-domain.com"],
+    "AllowedMethods": ["PUT", "POST"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3000
+  }
+  ```
+</Accordion>

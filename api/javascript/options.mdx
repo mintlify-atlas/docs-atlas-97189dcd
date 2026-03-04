@@ -1,0 +1,190 @@
+---
+title: 'Options'
+description: 'Configuration options for S3M JavaScript uploads'
+---
+
+## Overview
+
+The options object can be passed to both the `S3M` constructor and the `s3m()` helper function to configure upload behavior.
+
+## Upload Configuration
+
+<ParamField path="chunk_size" type="number" default="10485760">
+  Size of each chunk in bytes. Default is 10MB (10 * 1024 * 1024).
+  
+  ```javascript
+  {
+    chunk_size: 5 * 1024 * 1024 // 5MB chunks
+  }
+  ```
+</ParamField>
+
+<ParamField path="max_concurrent_uploads" type="number" default="5">
+  Maximum number of chunks to upload concurrently. Higher values can speed up uploads but use more resources.
+  
+  ```javascript
+  {
+    max_concurrent_uploads: 3
+  }
+  ```
+</ParamField>
+
+<ParamField path="chunk_retries" type="number" default="3">
+  Maximum number of retry attempts for a failed chunk upload.
+  
+  ```javascript
+  {
+    chunk_retries: 5
+  }
+  ```
+</ParamField>
+
+<ParamField path="auto_complete" type="boolean" default="true">
+  Whether to automatically complete the multipart upload after all chunks are uploaded. 
+  
+  When set to `false`, the upload method returns the parts array and upload_id without calling the complete endpoint, allowing you to manually complete the upload later.
+  
+  ```javascript
+  {
+    auto_complete: false
+  }
+  ```
+</ParamField>
+
+## Progress Tracking
+
+<ParamField path="progress" type="Function">
+  Callback function that receives upload progress updates.
+  
+  **Parameters:**
+  - `percent` (number): Upload progress from 0 to 100
+  
+  ```javascript
+  {
+    progress: (percent) => {
+      console.log(`Upload progress: ${percent}%`);
+      updateProgressBar(percent);
+    }
+  }
+  ```
+</ParamField>
+
+## HTTP Configuration
+
+<ParamField path="baseURL" type="string">
+  Base URL for API requests. If not specified, requests use the current origin.
+  
+  ```javascript
+  {
+    baseURL: 'https://api.example.com'
+  }
+  ```
+</ParamField>
+
+<ParamField path="headers" type="Object">
+  Custom headers to include in API requests to your Laravel backend.
+  
+  ```javascript
+  {
+    headers: {
+      'X-CSRF-TOKEN': csrfToken,
+      'Authorization': 'Bearer ' + token
+    }
+  }
+  ```
+</ParamField>
+
+<ParamField path="httpClient" type="Object">
+  Custom HTTP client to use instead of axios. Must implement the same interface as axios.
+  
+  ```javascript
+  import customClient from './my-http-client';
+  
+  {
+    httpClient: customClient
+  }
+  ```
+</ParamField>
+
+<ParamField path="options" type="Object">
+  Additional axios configuration options to pass through to HTTP requests.
+  
+  ```javascript
+  {
+    options: {
+      timeout: 30000,
+      withCredentials: true
+    }
+  }
+  ```
+</ParamField>
+
+## Custom Data
+
+<ParamField path="data" type="Object">
+  Additional data to send with the multipart upload requests. This data is merged with the request payload.
+  
+  Useful for passing metadata, user IDs, folder paths, or other custom fields to your Laravel backend.
+  
+  ```javascript
+  {
+    data: {
+      folder: 'documents/2024',
+      user_id: 123,
+      visibility: 'private',
+      metadata: {
+        description: 'Important document'
+      }
+    }
+  }
+  ```
+</ParamField>
+
+## Complete Example
+
+```javascript
+import S3M from '@savannabits/s3m';
+
+const file = document.getElementById('file-input').files[0];
+
+const options = {
+  // Upload configuration
+  chunk_size: 5 * 1024 * 1024,      // 5MB chunks
+  max_concurrent_uploads: 3,         // Upload 3 chunks at a time
+  chunk_retries: 5,                  // Retry failed chunks up to 5 times
+  auto_complete: true,               // Auto-complete the upload
+  
+  // Progress tracking
+  progress: (percent) => {
+    document.getElementById('progress').value = percent;
+  },
+  
+  // HTTP configuration
+  baseURL: 'https://api.example.com',
+  headers: {
+    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+    'Authorization': 'Bearer ' + localStorage.getItem('token')
+  },
+  
+  // Custom data
+  data: {
+    folder: 'uploads/documents',
+    visibility: 'private',
+    user_id: 42
+  },
+  
+  // Additional axios options
+  options: {
+    timeout: 60000,
+    withCredentials: true
+  }
+};
+
+const uploader = new S3M(file, options);
+const result = await uploader.upload();
+```
+
+## Related
+
+- [S3M Class](/api/javascript/s3m-class)
+- [Methods Reference](/api/javascript/methods)

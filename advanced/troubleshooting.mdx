@@ -1,0 +1,529 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for S3M multipart uploads
+---
+
+## Common Issues
+
+### CORS Configuration
+
+#### Problem
+
+Browser console shows CORS errors when uploading:
+
+```
+Access to XMLHttpRequest at 'https://bucket.s3.amazonaws.com/...' from origin 'https://yourapp.com' has been blocked by CORS policy
+```
+
+#### Solution
+
+Configure CORS on your S3 bucket:
+
+<CodeGroup>
+```json AWS Console
+[
+    {
+        "AllowedHeaders": ["*"],
+        "AllowedMethods": ["PUT", "POST", "GET", "HEAD"],
+        "AllowedOrigins": ["https://yourapp.com"],
+        "ExposeHeaders": ["ETag"],
+        "MaxAgeSeconds": 3000
+    }
+]
+```
+
+```bash AWS CLI
+aws s3api put-bucket-cors --bucket your-bucket --cors-configuration file://cors.json
+```
+
+```xml XML Format
+<?xml version="1.0" encoding="UTF-8"?>
+<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+    <CORSRule>
+        <AllowedOrigin>https://yourapp.com</AllowedOrigin>
+        <AllowedMethod>PUT</AllowedMethod>
+        <AllowedMethod>POST</AllowedMethod>
+        <AllowedMethod>GET</AllowedMethod>
+        <AllowedMethod>HEAD</AllowedMethod>
+        <AllowedHeader>*</AllowedHeader>
+        <ExposeHeader>ETag</ExposeHeader>
+        <MaxAgeSeconds>3000</MaxAgeSeconds>
+    </CORSRule>
+</CORSConfiguration>
+```
+</CodeGroup>
+
+<Note>
+  For development, you can use `"*"` for AllowedOrigins, but use specific domains in production.
+</Note>
+
+### Invalid AWS Credentials
+
+#### Problem
+
+```
+Error: The AWS Access Key Id you provided does not exist in our records
+```
+
+#### Solution
+
+1. Verify credentials in `.env`:
+
+```bash
+AWS_ACCESS_KEY_ID=your-access-key
+AWS_SECRET_ACCESS_KEY=your-secret-key
+AWS_DEFAULT_REGION=us-east-1
+AWS_BUCKET=your-bucket
+```
+
+2. Clear config cache:
+
+```bash
+php artisan config:clear
+php artisan cache:clear
+```
+
+3. Verify credentials are loaded:
+
+```php
+// In tinker or a test route
+config('s3m.s3.key');
+config('s3m.s3.secret');
+```
+
+<Warning>
+  Never commit `.env` file to version control. Use `.env.example` for templates.
+</Warning>
+
+### Missing IAM Permissions
+
+#### Problem
+
+```
+Error: Access Denied (403)
+```
+
+#### Solution
+
+Ensure your IAM user has the required permissions:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl",
+                "s3:GetObject",
+                "s3:AbortMultipartUpload",
+                "s3:ListMultipartUploadParts",
+                "s3:ListBucketMultipartUploads"
+            ],
+            "Resource": [
+                "arn:aws:s3:::your-bucket/*",
+                "arn:aws:s3:::your-bucket"
+            ]
+        }
+    ]
+}
+```
+
+### Upload Timeout Issues
+
+#### Problem
+
+Large files timeout during upload.
+
+#### Solution
+
+1. Adjust chunk size and concurrency:
+
+```javascript
+const uploader = new S3M(file, {
+    chunk_size: 5 * 1024 * 1024, // 5MB chunks (smaller for slow connections)
+    max_concurrent_uploads: 3, // Reduce concurrent uploads
+    chunk_retries: 5, // Increase retries
+});
+```
+
+2. Increase PHP timeouts in `.env`:
+
+```bash
+MAX_EXECUTION_TIME=300
+```
+
+3. Update `php.ini`:
+
+```ini
+max_execution_time = 300
+max_input_time = 300
+upload_max_filesize = 100M
+post_max_size = 100M
+```
+
+### Presigned URL Expired
+
+#### Problem
+
+```
+Error: Request has expired
+```
+
+#### Solution
+
+Presigned URLs expire after 5 minutes (default from `S3MultipartController.php:76`). Increase expiration:
+
+```php
+class CustomS3MultipartController extends S3MultipartController
+{
+    public function signPartUpload(SignPartRequest $request): JsonResponse
+    {
+        $client = S3M::storageClient();
+        $bucket = $request->input('bucket') ?: S3M::getBucket();
+        
+        $expiresAfter = 15; // 15 minutes instead of 5
+        
+        $signedRequest = $client->createPresignedRequest(
+            $this->createCommand($request, $client, $bucket),
+            sprintf('+%s minutes', $expiresAfter)
+        );
+        
+        // ... rest of the method
+    }
+}
+```
+
+### Bucket Not Found
+
+#### Problem
+
+```
+Error: The specified bucket does not exist
+```
+
+#### Solution
+
+1. Verify bucket name in `.env`:
+
+```bash
+AWS_BUCKET=your-bucket-name
+```
+
+2. Check bucket region matches:
+
+```bash
+AWS_DEFAULT_REGION=us-east-1
+```
+
+3. Create bucket if needed:
+
+```bash
+aws s3 mb s3://your-bucket-name --region us-east-1
+```
+
+### JavaScript Errors
+
+#### Problem
+
+```
+Uncaught ReferenceError: axios is not defined
+```
+
+#### Solution
+
+S3M uses axios by default. Ensure it's available:
+
+```html
+<!-- Include axios -->
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="/path/to/s3m.js"></script>
+```
+
+Or provide custom HTTP client:
+
+```javascript
+import customHttpClient from './http-client';
+
+const uploader = new S3M(file, {
+    httpClient: customHttpClient,
+});
+```
+
+## Debugging Tips
+
+### Enable Debug Mode
+
+```bash
+# .env
+APP_DEBUG=true
+LOG_LEVEL=debug
+```
+
+### Check Laravel Logs
+
+```bash
+tail -f storage/logs/laravel.log
+```
+
+### Monitor S3M Events
+
+Add event listeners to track upload lifecycle:
+
+```php
+use MrEduar\S3M\Events\MultipartUploadCreated;
+use MrEduar\S3M\Events\MultipartUploadCompleted;
+use Illuminate\Support\Facades\Log;
+
+Event::listen(MultipartUploadCreated::class, function ($event) {
+    Log::debug('Upload created', [
+        'uuid' => $event->uuid,
+        'key' => $event->key,
+    ]);
+});
+
+Event::listen(MultipartUploadCompleted::class, function ($event) {
+    Log::debug('Upload completed', [
+        'url' => $event->url,
+    ]);
+});
+```
+
+### Browser Console Debugging
+
+```javascript
+const uploader = new S3M(file, {
+    progress: (percentage) => {
+        console.log(`Progress: ${percentage}%`);
+    },
+});
+
+try {
+    console.log('Starting upload...');
+    const result = await uploader.upload();
+    console.log('Upload successful:', result);
+} catch (error) {
+    console.error('Upload failed:', error);
+    console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+    });
+}
+```
+
+### Test S3 Connection
+
+Create a test route:
+
+```php
+Route::get('/test-s3', function () {
+    try {
+        $client = MrEduar\S3M\Facades\S3M::storageClient();
+        $result = $client->listBuckets();
+        
+        return response()->json([
+            'status' => 'success',
+            'buckets' => collect($result['Buckets'])->pluck('Name'),
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage(),
+        ], 500);
+    }
+});
+```
+
+### Verify Chunk Upload
+
+Add logging to track chunk uploads:
+
+```javascript
+class DebugS3M extends S3M {
+    async uploadChunk(key, uploadId, partNumber, chunk, totalChunks, progress, updateProgress) {
+        console.log(`Uploading chunk ${partNumber}/${totalChunks}`);
+        
+        try {
+            const result = await super.uploadChunk(
+                key, uploadId, partNumber, chunk, 
+                totalChunks, progress, updateProgress
+            );
+            console.log(`Chunk ${partNumber} uploaded:`, result);
+            return result;
+        } catch (error) {
+            console.error(`Chunk ${partNumber} failed:`, error);
+            throw error;
+        }
+    }
+}
+```
+
+## FAQ
+
+<Accordion title="How large can uploaded files be?">
+  AWS S3 multipart uploads support files up to **5 TB**. Each part must be between **5 MB** and **5 GB** (except the last part).
+
+  Default chunk size in S3M is **10 MB** (from `S3M.js:7`):
+  ```javascript
+  static DEFAULT_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+  ```
+
+  Adjust as needed:
+  ```javascript
+  const uploader = new S3M(file, {
+      chunk_size: 50 * 1024 * 1024, // 50MB chunks
+  });
+  ```
+</Accordion>
+
+<Accordion title="Can I upload to multiple buckets?">
+  Yes, if enabled in `config/s3m.php`:
+  ```php
+  'allow_change_bucket' => true,
+  ```
+
+  Then specify bucket on upload:
+  ```javascript
+  const uploader = new S3M(file, {
+      data: {
+          bucket: 'my-other-bucket',
+      },
+  });
+  ```
+</Accordion>
+
+<Accordion title="How do I delete incomplete uploads?">
+  Use AWS CLI to list and delete incomplete uploads:
+
+  ```bash
+  # List incomplete uploads
+  aws s3api list-multipart-uploads --bucket your-bucket
+
+  # Abort specific upload
+  aws s3api abort-multipart-upload \
+    --bucket your-bucket \
+    --key tmp/uuid \
+    --upload-id upload-id
+
+  # Abort all incomplete uploads older than 7 days
+  aws s3api list-multipart-uploads --bucket your-bucket \
+    --query 'Uploads[?Initiated<`2023-01-01`].[Key,UploadId]' \
+    --output text | while read key uploadid; do
+      aws s3api abort-multipart-upload \
+        --bucket your-bucket \
+        --key "$key" \
+        --upload-id "$uploadid"
+    done
+  ```
+
+  Or configure lifecycle policy in S3 to auto-delete incomplete uploads.
+</Accordion>
+
+<Accordion title="Can I pause and resume uploads?">
+  Not natively, but you can implement it:
+
+  ```javascript
+  const uploader = new S3M(file, {
+      auto_complete: false,
+  });
+
+  const result = await uploader.upload();
+  // Save: result.upload_id, result.parts, result.key
+
+  // Later, complete manually:
+  await axios.post('/s3m/complete-multipart-upload', {
+      key: result.key,
+      upload_id: result.upload_id,
+      parts: result.parts,
+  });
+  ```
+</Accordion>
+
+<Accordion title="How many concurrent uploads are optimal?">
+  Default is **5 concurrent uploads** (from `S3M.js:14`):
+  ```javascript
+  static DEFAULT_MAX_CONCURRENT_UPLOADS = 5;
+  ```
+
+  Recommendations:
+  - **Fast connections:** 5-10 concurrent uploads
+  - **Slow connections:** 2-3 concurrent uploads
+  - **Mobile devices:** 1-2 concurrent uploads
+
+  ```javascript
+  const uploader = new S3M(file, {
+      max_concurrent_uploads: 3,
+  });
+  ```
+</Accordion>
+
+<Accordion title="What happens if Laravel route middleware fails?">
+  The upload will fail with a 401/403 error. Ensure your middleware is configured correctly in `config/s3m.php:26-28`:
+
+  ```php
+  'middleware' => [
+      'web',
+      'auth', // Add authentication if needed
+  ],
+  ```
+</Accordion>
+
+<Accordion title="Can I customize the upload folder structure?">
+  Yes! Override the `getKey()` method in a custom controller:
+
+  ```php
+  protected function getKey(string $uuid, string $folder): string
+  {
+      $userId = auth()->id();
+      $date = date('Y/m/d');
+      return "users/{$userId}/{$date}/{$folder}/{$uuid}";
+  }
+  ```
+
+  See [Customization](/advanced/customization) for more details.
+</Accordion>
+
+<Accordion title="How do I handle network interruptions?">
+  S3M automatically retries failed chunks up to 3 times by default. Increase retries for unstable connections:
+
+  ```javascript
+  const uploader = new S3M(file, {
+      chunk_retries: 10, // Retry each chunk up to 10 times
+  });
+  ```
+
+  See [Error Handling](/advanced/error-handling) for advanced retry strategies.
+</Accordion>
+
+<Accordion title="Can I use S3-compatible storage (MinIO, DigitalOcean Spaces)?">
+  Yes! Configure the endpoint in `config/s3m.php`:
+
+  ```php
+  's3' => [
+      'endpoint' => env('AWS_ENDPOINT'), // https://nyc3.digitaloceanspaces.com
+      'use_path_style_endpoint' => true,
+      // ... other settings
+  ],
+  ```
+
+  In `.env`:
+  ```bash
+  AWS_ENDPOINT=https://nyc3.digitaloceanspaces.com
+  AWS_USE_PATH_STYLE_ENDPOINT=true
+  ```
+</Accordion>
+
+## Getting Help
+
+If you're still experiencing issues:
+
+1. Check the [GitHub Issues](https://github.com/mreduar/s3m)
+2. Review AWS S3 [documentation](https://docs.aws.amazon.com/s3/)
+3. Enable debug mode and check logs
+4. Test with a minimal example
+
+<Info>
+  Include error messages, Laravel version, and S3M configuration when reporting issues.
+</Info>

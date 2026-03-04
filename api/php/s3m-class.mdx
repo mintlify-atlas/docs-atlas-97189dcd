@@ -1,0 +1,224 @@
+---
+title: 'S3M Class'
+description: 'Core S3M class for managing multipart uploads to AWS S3'
+---
+
+## Overview
+
+The `S3M` class provides the core functionality for managing multipart uploads to AWS S3. It handles S3 client configuration, bucket management, and multipart upload completion.
+
+**Namespace:** `MrEduar\S3M\S3M`
+
+## Methods
+
+### getBucket()
+
+Get the configured S3 bucket name from the configuration.
+
+```php
+public static function getBucket(): string
+```
+
+<ParamField path="return" type="string">
+  The configured S3 bucket name from `config('s3m.s3.bucket')`
+</ParamField>
+
+#### Example
+
+```php
+use MrEduar\S3M\Facades\S3M;
+
+$bucket = S3M::getBucket();
+// Returns: 'my-s3-bucket'
+```
+
+---
+
+### ensureConfigureVariablesAreAvailable()
+
+Validate that all required S3 configuration variables are available before performing operations.
+
+```php
+public static function ensureConfigureVariablesAreAvailable(?array $options = []): void
+```
+
+<ParamField path="options" type="array" optional>
+  Optional configuration overrides
+  
+  <ParamField path="options.bucket" type="string" optional>
+    Custom bucket name (if not provided, checks config)
+  </ParamField>
+</ParamField>
+
+#### Validated Configuration Keys
+
+The method validates the following configuration keys from `config('s3m.s3')`:
+
+- `bucket` (unless provided in options)
+- `region`
+- `key` (AWS access key)
+- `secret` (AWS secret key)
+
+#### Exceptions
+
+<ResponseField name="InvalidArgumentException" type="\InvalidArgumentException">
+  Thrown when required configuration variables are missing. The exception message includes the names of missing variables.
+</ResponseField>
+
+#### Example
+
+```php
+use MrEduar\S3M\Facades\S3M;
+
+try {
+    S3M::ensureConfigureVariablesAreAvailable();
+    // Configuration is valid, proceed with S3 operations
+} catch (\InvalidArgumentException $e) {
+    // Handle missing configuration
+    // e.g., "Unable to issue signed URL. Missing S3M config variables: region, key"
+}
+
+// With custom bucket
+S3M::ensureConfigureVariablesAreAvailable(['bucket' => 'custom-bucket']);
+```
+
+---
+
+### storageClient()
+
+Create and return an AWS S3 client instance configured with the settings from your S3M configuration.
+
+```php
+public function storageClient(): S3Client
+```
+
+<ParamField path="return" type="\Aws\S3\S3Client">
+  Configured AWS S3 client instance
+</ParamField>
+
+#### Configuration
+
+The client is configured using values from `config('s3m.s3')` with the following parameters:
+
+- `region` - AWS region
+- `version` - API version (always 'latest')
+- `signature_version` - Signature version (always 'v4')
+- `use_path_style_endpoint` - Path style endpoint setting
+- `credentials` - AWS credentials (key, secret, token)
+- `url` - Custom S3 endpoint URL (optional)
+- `endpoint` - Custom endpoint (optional)
+
+#### Example
+
+```php
+use MrEduar\S3M\Facades\S3M;
+
+$client = S3M::storageClient();
+
+// Use the client for custom S3 operations
+$result = $client->listBuckets();
+```
+
+---
+
+### completeMultipartUpload()
+
+Complete a multipart upload operation by assembling all uploaded parts into a single S3 object.
+
+```php
+public function completeMultipartUpload(?array $options = []): array
+```
+
+<ParamField path="options" type="array" optional>
+  Upload completion options
+  
+  <ParamField path="options.bucket" type="string" optional>
+    S3 bucket name (defaults to configured bucket)
+  </ParamField>
+  
+  <ParamField path="options.key" type="string" required>
+    The S3 object key (file path)
+  </ParamField>
+  
+  <ParamField path="options.upload_id" type="string" required>
+    The multipart upload ID from `createMultipartUpload`
+  </ParamField>
+  
+  <ParamField path="options.parts" type="array" required>
+    Array of uploaded parts with their ETags
+    
+    <ParamField path="options.parts[].PartNumber" type="integer" required>
+      Part number (starting from 1)
+    </ParamField>
+    
+    <ParamField path="options.parts[].ETag" type="string" required>
+      ETag value returned from the part upload
+    </ParamField>
+  </ParamField>
+</ParamField>
+
+<ParamField path="return" type="array">
+  AWS S3 response array containing upload details
+  
+  <ResponseField name="Location" type="string">
+    The URL of the uploaded object
+  </ResponseField>
+  
+  <ResponseField name="Bucket" type="string">
+    The bucket name
+  </ResponseField>
+  
+  <ResponseField name="Key" type="string">
+    The object key
+  </ResponseField>
+  
+  <ResponseField name="ETag" type="string">
+    The entity tag of the completed object
+  </ResponseField>
+</ParamField>
+
+#### Example
+
+```php
+use MrEduar\S3M\Facades\S3M;
+
+$result = S3M::completeMultipartUpload([
+    'bucket' => 'my-bucket',
+    'key' => 'uploads/my-file.mp4',
+    'upload_id' => 'example-upload-id-123',
+    'parts' => [
+        ['PartNumber' => 1, 'ETag' => '"etag-part-1"'],
+        ['PartNumber' => 2, 'ETag' => '"etag-part-2"'],
+        ['PartNumber' => 3, 'ETag' => '"etag-part-3"'],
+    ]
+]);
+
+// Access the uploaded file URL
+$fileUrl = $result['Location'];
+```
+
+#### Exceptions
+
+<ResponseField name="InvalidArgumentException" type="\InvalidArgumentException">
+  Thrown if required S3 configuration variables are missing
+</ResponseField>
+
+## Facade Usage
+
+All methods are available through the `S3M` facade:
+
+```php
+use MrEduar\S3M\Facades\S3M;
+
+// Get bucket
+$bucket = S3M::getBucket();
+
+// Validate configuration
+S3M::ensureConfigureVariablesAreAvailable();
+
+// Get S3 client
+$client = S3M::storageClient();
+
+// Complete upload
+$result = S3M::completeMultipartUpload($options);
+```

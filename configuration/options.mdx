@@ -1,0 +1,250 @@
+---
+title: 'Configuration Options'
+description: 'Complete reference for all S3M configuration options'
+---
+
+## Overview
+
+S3M provides several configuration options to control upload behavior, security, and storage settings. All options are defined in the `config/s3m.php` file.
+
+## Publishing Configuration
+
+Publish the configuration file to customize S3M settings:
+
+```bash
+php artisan vendor:publish --provider="MrEduar\S3M\S3MServiceProvider"
+```
+
+This creates `config/s3m.php` in your project.
+
+## Configuration Options
+
+### Bucket Configuration
+
+<ParamField path="allow_change_bucket" type="boolean" default="true">
+  Allows the client to specify a different S3 bucket for uploads.
+  
+  When enabled, users can upload to buckets other than the default configured bucket.
+  
+  <Warning>
+    Enabling this option may have security implications. Ensure proper authorization checks are in place.
+  </Warning>
+</ParamField>
+
+<CodeGroup>
+```php Default (Enabled)
+'allow_change_bucket' => true,
+```
+
+```php Disabled
+'allow_change_bucket' => false,
+```
+</CodeGroup>
+
+### Visibility Configuration
+
+<ParamField path="allow_change_visibility" type="boolean" default="true">
+  Allows the client to modify the visibility (ACL) of uploaded files.
+  
+  When enabled, users can set file visibility to public or private during upload.
+  
+  The default visibility is `private` if not specified.
+</ParamField>
+
+<CodeGroup>
+```php Default (Enabled)
+'allow_change_visibility' => true,
+```
+
+```php Disabled
+'allow_change_visibility' => false,
+```
+</CodeGroup>
+
+<Info>
+  Supported S3 visibility options include: `private`, `public-read`, `public-read-write`, `authenticated-read`, `aws-exec-read`, `bucket-owner-read`, `bucket-owner-full-control`.
+</Info>
+
+### Folder Configuration
+
+<ParamField path="allow_change_folder" type="boolean" default="false">
+  Allows the client to specify a custom folder/directory for uploaded files.
+  
+  When disabled, all files are stored in the `/tmp/` directory at the bucket root.
+  
+  The storage format is: `/tmp/{filename}` where `{filename}` is a UUID generated for each upload.
+</ParamField>
+
+<CodeGroup>
+```php Default (Disabled)
+'allow_change_folder' => false,
+```
+
+```php Enabled
+'allow_change_folder' => true,
+```
+</CodeGroup>
+
+<Note>
+  Files in the `/tmp/` directory should be automatically purged after 24 hours using an S3 lifecycle policy.
+</Note>
+
+### Middleware Configuration
+
+<ParamField path="middleware" type="array" default="['web']">
+  Middleware stack applied to S3M routes.
+  
+  Define which middleware should be applied to the multipart upload endpoints.
+</ParamField>
+
+<CodeGroup>
+```php Default
+'middleware' => [
+    'web',
+],
+```
+
+```php With Authentication
+'middleware' => [
+    'web',
+    'auth',
+],
+```
+
+```php API Routes
+'middleware' => [
+    'api',
+    'auth:sanctum',
+],
+```
+</CodeGroup>
+
+<Warning>
+  Always include authentication middleware to prevent unauthorized uploads.
+</Warning>
+
+## S3 Connection Settings
+
+<ParamField path="s3" type="object">
+  AWS S3 connection configuration.
+</ParamField>
+
+<CodeGroup>
+```php Full Configuration
+'s3' => [
+    'key' => env('AWS_ACCESS_KEY_ID'),
+    'secret' => env('AWS_SECRET_ACCESS_KEY'),
+    'token' => env('AWS_SESSION_TOKEN'),
+    'region' => env('AWS_DEFAULT_REGION'),
+    'bucket' => env('AWS_BUCKET'),
+    'url' => env('AWS_URL'),
+    'endpoint' => env('AWS_ENDPOINT'),
+    'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+],
+```
+</CodeGroup>
+
+### S3 Parameters
+
+<ParamField path="s3.key" type="string" required>
+  AWS Access Key ID from environment variable `AWS_ACCESS_KEY_ID`
+</ParamField>
+
+<ParamField path="s3.secret" type="string" required>
+  AWS Secret Access Key from environment variable `AWS_SECRET_ACCESS_KEY`
+</ParamField>
+
+<ParamField path="s3.token" type="string">
+  AWS Session Token for temporary credentials from environment variable `AWS_SESSION_TOKEN`
+</ParamField>
+
+<ParamField path="s3.region" type="string" required>
+  AWS region (e.g., `us-east-1`, `eu-west-1`) from environment variable `AWS_DEFAULT_REGION`
+</ParamField>
+
+<ParamField path="s3.bucket" type="string" required>
+  Default S3 bucket name from environment variable `AWS_BUCKET`
+</ParamField>
+
+<ParamField path="s3.url" type="string">
+  Custom URL for accessing files (e.g., CloudFront CDN) from environment variable `AWS_URL`
+</ParamField>
+
+<ParamField path="s3.endpoint" type="string">
+  Custom S3 endpoint for S3-compatible services from environment variable `AWS_ENDPOINT`
+</ParamField>
+
+<ParamField path="s3.use_path_style_endpoint" type="boolean" default="false">
+  Use path-style endpoints instead of virtual-hosted-style from environment variable `AWS_USE_PATH_STYLE_ENDPOINT`
+</ParamField>
+
+## Complete Configuration Example
+
+<CodeGroup>
+```php config/s3m.php
+<?php
+
+return [
+    /**
+     * Indicates whether the bucket of the uploaded file can be changed.
+     * The default bucket is the one configured below.
+     */
+    'allow_change_bucket' => true,
+
+    /**
+     * Indicates whether the visibility of the uploaded file can be modified.
+     * The default visibility setting is private.
+     */
+    'allow_change_visibility' => true,
+
+    /**
+     * Indicates whether the folder of the uploaded file can be changed.
+     * By default, files are stored in the /tmp/ directory at the root of the bucket,
+     * following the format /tmp/{filename}, where {filename} is the UUID generated for the upload.
+     */
+    'allow_change_folder' => false,
+
+    /**
+     * Middleware to be used for the multipart upload.
+     */
+    'middleware' => [
+        'web',
+    ],
+
+    /**
+     * S3 configuration.
+     */
+    's3' => [
+        'key' => env('AWS_ACCESS_KEY_ID'),
+        'secret' => env('AWS_SECRET_ACCESS_KEY'),
+        'token' => env('AWS_SESSION_TOKEN'),
+        'region' => env('AWS_DEFAULT_REGION'),
+        'bucket' => env('AWS_BUCKET'),
+        'url' => env('AWS_URL'),
+        'endpoint' => env('AWS_ENDPOINT'),
+        'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+    ],
+];
+```
+</CodeGroup>
+
+## Environment Variables
+
+All AWS credentials should be stored in your `.env` file:
+
+```bash .env
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+AWS_DEFAULT_REGION=us-east-1
+AWS_BUCKET=your-bucket-name
+
+# Optional
+AWS_SESSION_TOKEN=your-session-token
+AWS_URL=https://your-cdn.cloudfront.net
+AWS_ENDPOINT=https://s3.custom-endpoint.com
+AWS_USE_PATH_STYLE_ENDPOINT=false
+```
+
+<Warning>
+  Never commit your `.env` file to version control. Keep your AWS credentials secure.
+</Warning>

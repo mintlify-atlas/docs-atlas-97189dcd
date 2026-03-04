@@ -1,0 +1,280 @@
+---
+title: Customization
+description: Customize S3M to fit your application's specific needs
+---
+
+## Controller Customization
+
+You can customize the upload behavior by extending the default controller and implementing the `StorageMultipartUploadControllerContract`.
+
+### Custom Controller Example
+
+```php
+use MrEduar\S3M\Contracts\StorageMultipartUploadControllerContract;
+use MrEduar\S3M\Http\Controllers\S3MultipartController;
+use Illuminate\Http\JsonResponse;
+use MrEduar\S3M\Http\Requests\CreateMultipartUploadRequest;
+
+class CustomS3MultipartController extends S3MultipartController implements StorageMultipartUploadControllerContract
+{
+    /**
+     * Override the getKey method to customize folder structure
+     */
+    protected function getKey(string $uuid, string $folder): string
+    {
+        $userId = auth()->id();
+        $date = date('Y/m/d');
+        
+        return "uploads/{$userId}/{$date}/{$folder}/{$uuid}";
+    }
+    
+    /**
+     * Override default visibility
+     */
+    protected function defaultVisibility(): string
+    {
+        return 'public-read';
+    }
+    
+    /**
+     * Add custom logic to createMultipartUpload
+     */
+    public function createMultipartUpload(CreateMultipartUploadRequest $request): JsonResponse
+    {
+        // Add custom validation or logic
+        if (!auth()->user()->canUploadFiles()) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+        
+        return parent::createMultipartUpload($request);
+    }
+}
+```
+
+### Register Custom Controller
+
+Update your route service provider or routes file:
+
+```php
+use App\Http\Controllers\CustomS3MultipartController;
+
+Route::post('/s3m/create-multipart-upload', [CustomS3MultipartController::class, 'createMultipartUpload']);
+Route::post('/s3m/create-sign-part', [CustomS3MultipartController::class, 'signPartUpload']);
+Route::post('/s3m/complete-multipart-upload', [CustomS3MultipartController::class, 'completeMultipartUpload']);
+```
+
+## Middleware Configuration
+
+Customize the middleware applied to multipart upload routes in `config/s3m.php`:
+
+```php
+'middleware' => [
+    'web',
+    'auth',
+    'throttle:60,1',
+],
+```
+
+<Accordion title="Available Middleware Options">
+  - `web` - Standard web middleware group
+  - `auth` - Require authentication
+  - `auth:sanctum` - API token authentication
+  - `throttle:60,1` - Rate limiting (60 requests per minute)
+  - Custom middleware for additional validation
+</Accordion>
+
+## Visibility Settings
+
+### Configuration
+
+Control whether users can change file visibility in `config/s3m.php`:
+
+```php
+/**
+ * Indicates whether the visibility of the uploaded file can be modified.
+ * The default visibility setting is private.
+ */
+'allow_change_visibility' => true,
+```
+
+### Default Visibility
+
+The default visibility is `private`. Override the `defaultVisibility()` method in your custom controller:
+
+```php
+protected function defaultVisibility(): string
+{
+    return 'private'; // Options: 'private', 'public-read', 'public-read-write'
+}
+```
+
+<Info>
+  The `defaultVisibility()` method in `S3MultipartController.php:164-167` returns the ACL for uploaded files.
+</Info>
+
+### Client-Side Visibility
+
+Pass visibility option when creating an upload:
+
+```javascript
+const uploader = new S3M(file, {
+    data: {
+        visibility: 'public-read',
+    },
+});
+```
+
+## Folder Structure Customization
+
+### Configuration
+
+Control folder permissions in `config/s3m.php`:
+
+```php
+/**
+ * Indicates whether the folder of the uploaded file can be changed.
+ * By default, files are stored in the /tmp/ directory at the root of the bucket,
+ * following the format /tmp/{filename}, where {filename} is the UUID generated for the upload.
+ */
+'allow_change_folder' => false,
+```
+
+### Custom Folder Structure
+
+<CodeGroup>
+```php Controller Override
+protected function getKey(string $uuid, string $folder): string
+{
+    // Organize by year/month/day
+    $datePath = date('Y/m/d');
+    return "uploads/{$datePath}/{$folder}/{$uuid}";
+}
+```
+
+```php User-Based Folders
+protected function getKey(string $uuid, string $folder): string
+{
+    $userId = auth()->id();
+    return "users/{$userId}/{$folder}/{$uuid}";
+}
+```
+
+```php Environment-Based Folders
+protected function getKey(string $uuid, string $folder): string
+{
+    $env = app()->environment();
+    return "{$env}/{$folder}/{$uuid}";
+}
+```
+</CodeGroup>
+
+<Note>
+  The `getKey()` method is called in `S3MultipartController.php:156-159` to generate the S3 object key.
+</Note>
+
+### Client-Side Folder Selection
+
+```javascript
+const uploader = new S3M(file, {
+    data: {
+        folder: 'documents', // Custom folder name
+    },
+});
+```
+
+## Bucket Configuration
+
+### Allow Bucket Changes
+
+Configure in `config/s3m.php`:
+
+```php
+/**
+ * Indicates whether the bucket of the uploaded file can be changed.
+ * The default bucket is the one configured below.
+ */
+'allow_change_bucket' => true,
+```
+
+### Default Bucket
+
+```php
+'s3' => [
+    'bucket' => env('AWS_BUCKET'),
+    // ... other S3 settings
+],
+```
+
+### Client-Side Bucket Selection
+
+```javascript
+const uploader = new S3M(file, {
+    data: {
+        bucket: 'my-custom-bucket',
+    },
+});
+```
+
+<Warning>
+  Ensure your AWS credentials have permissions for the specified bucket when allowing bucket changes.
+</Warning>
+
+## Content Type Customization
+
+### Server-Side Default
+
+The default content type is `application/octet-stream` (see `S3MultipartController.php:137`).
+
+### Custom Content Type
+
+```php
+protected function createCommand(Request $request, S3Client $client, string $bucket): CommandInterface
+{
+    $contentType = $request->input('content_type') ?: $this->getContentType($request);
+    
+    return $client->getCommand('UploadPart', [
+        // ...
+        'ContentType' => $contentType,
+    ]);
+}
+
+protected function getContentType(Request $request): string
+{
+    // Custom logic to determine content type
+    $extension = pathinfo($request->input('filename'), PATHINFO_EXTENSION);
+    
+    return match($extension) {
+        'pdf' => 'application/pdf',
+        'jpg', 'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        default => 'application/octet-stream',
+    };
+}
+```
+
+## Presigned URL Expiration
+
+The default expiration for presigned URLs is 5 minutes (see `S3MultipartController.php:76`).
+
+### Custom Expiration
+
+```php
+protected function getPresignedUrlExpiration(): int
+{
+    return 15; // 15 minutes
+}
+
+public function signPartUpload(SignPartRequest $request): JsonResponse
+{
+    // ...
+    $signedRequest = $client->createPresignedRequest(
+        $this->createCommand($request, $client, $bucket),
+        sprintf('+%s minutes', $this->getPresignedUrlExpiration())
+    );
+    // ...
+}
+```
+
+<Info>
+  Shorter expiration times are more secure but may cause issues with slow connections. Balance security with usability.
+</Info>

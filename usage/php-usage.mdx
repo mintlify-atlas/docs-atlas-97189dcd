@@ -1,0 +1,213 @@
+---
+title: PHP Usage
+description: Learn how to use the S3M facade and methods in your Laravel backend
+---
+
+## Using the S3M Facade
+
+The S3M package provides a convenient facade for interacting with multipart uploads on the backend.
+
+### Available Methods
+
+The S3M facade provides the following methods:
+
+<ParamField path="storageClient()" type="\Aws\S3\S3Client">
+  Returns the configured S3 client instance for direct AWS operations
+</ParamField>
+
+<ParamField path="completeMultipartUpload()" type="array">
+  Completes a multipart upload and returns the upload result
+</ParamField>
+
+<ParamField path="getBucket()" type="string">
+  Returns the configured S3 bucket name from config
+</ParamField>
+
+<ParamField path="ensureConfigureVariablesAreAvailable()" type="void">
+  Validates that required S3 configuration variables are present
+</ParamField>
+
+## Getting the Storage Client
+
+Access the underlying AWS S3 client for advanced operations:
+
+```php
+use MrEduar\S3M\Facades\S3M;
+
+$client = S3M::storageClient();
+
+// Now you can use any AWS S3 SDK methods
+$result = $client->listObjects([
+    'Bucket' => S3M::getBucket(),
+    'Prefix' => 'uploads/',
+]);
+```
+
+<Note>
+The storage client is automatically configured using your `config/s3m.php` settings including region, credentials, and endpoint configuration.
+</Note>
+
+## Completing Multipart Uploads
+
+When using `auto_complete: false` in the JavaScript client, you'll need to manually complete the upload on the backend:
+
+```php
+use MrEduar\S3M\Facades\S3M;
+
+$result = S3M::completeMultipartUpload([
+    'bucket' => 'my-bucket', // Optional, uses config default if not provided
+    'key' => 'tmp/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d',
+    'upload_id' => 'VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA',
+    'parts' => [
+        [
+            'ETag' => '"7778aef83f66abc1fa1e8477f296d394"',
+            'PartNumber' => 1,
+        ],
+        [
+            'ETag' => '"aaaa18db4cc2f85cedef654fccc4a4x8"',
+            'PartNumber' => 2,
+        ],
+    ],
+]);
+
+// Returns array with Location, Bucket, Key, etc.
+echo $result['Location']; // https://my-bucket.s3.amazonaws.com/tmp/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+```
+
+<Warning>
+The `parts` array must be sorted by `PartNumber` and contain all ETags from the upload process.
+</Warning>
+
+## Moving Files from Temporary Storage
+
+After a successful upload, files are stored in the `tmp/` directory. Move them to permanent storage:
+
+```php
+use Illuminate\Support\Facades\Storage;
+
+Storage::copy(
+    $request->input('key'),
+    str_replace('tmp/', '', $request->input('key'))
+);
+```
+
+### Complete Example: Saving Profile Photo
+
+<CodeGroup>
+
+```php Controller Method
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use App\Models\User;
+
+public function updateProfilePhoto(Request $request)
+{
+    $validated = $request->validate([
+        'uuid' => 'required|uuid',
+        'key' => 'required|string',
+        'name' => 'required|string',
+        'content_type' => 'required|string',
+    ]);
+
+    // Move file from tmp to permanent location
+    $permanentKey = str_replace('tmp/', 'profile-photos/', $validated['key']);
+    
+    Storage::copy($validated['key'], $permanentKey);
+
+    // Save to database
+    $request->user()->update([
+        'profile_photo_path' => $permanentKey,
+    ]);
+
+    // Optional: Delete the tmp file
+    Storage::delete($validated['key']);
+
+    return response()->json([
+        'message' => 'Profile photo updated successfully',
+        'url' => Storage::url($permanentKey),
+    ]);
+}
+```
+
+```php Route
+use App\Http\Controllers\ProfileController;
+
+Route::middleware('auth')->group(function () {
+    Route::post('/api/profile-photo', [ProfileController::class, 'updateProfilePhoto']);
+});
+```
+
+</CodeGroup>
+
+## Storing File Metadata
+
+Store information about uploaded files in your database:
+
+```php
+use App\Models\Upload;
+
+$upload = Upload::create([
+    'user_id' => auth()->id(),
+    'uuid' => $request->input('uuid'),
+    'filename' => $request->input('name'),
+    'mime_type' => $request->input('content_type'),
+    's3_key' => str_replace('tmp/', 'uploads/', $request->input('key')),
+    'size' => $request->input('size'),
+]);
+
+// Move from tmp to permanent storage
+Storage::copy(
+    $request->input('key'),
+    $upload->s3_key
+);
+```
+
+<Accordion title="Example Migration">
+
+```php
+Schema::create('uploads', function (Blueprint $table) {
+    $table->id();
+    $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+    $table->uuid('uuid')->unique();
+    $table->string('filename');
+    $table->string('mime_type');
+    $table->string('s3_key');
+    $table->unsignedBigInteger('size')->nullable();
+    $table->timestamps();
+});
+```
+
+</Accordion>
+
+## Getting the Bucket Name
+
+Retrieve the configured bucket name:
+
+```php
+use MrEduar\S3M\Facades\S3M;
+
+$bucket = S3M::getBucket();
+
+// Use in your own S3 operations
+$url = "https://{$bucket}.s3.amazonaws.com/path/to/file.jpg";
+```
+
+## Configuration Validation
+
+Validate that all required S3 configuration is present:
+
+```php
+use MrEduar\S3M\Facades\S3M;
+
+try {
+    S3M::ensureConfigureVariablesAreAvailable();
+    // Configuration is valid
+} catch (\InvalidArgumentException $e) {
+    // Missing configuration
+    logger()->error('S3M configuration error: ' . $e->getMessage());
+}
+```
+
+<Note>
+This method is automatically called by other S3M methods, but you can use it for manual validation if needed.
+</Note>

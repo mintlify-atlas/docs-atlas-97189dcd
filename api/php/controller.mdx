@@ -1,0 +1,406 @@
+---
+title: 'S3MultipartController'
+description: 'HTTP controller for handling multipart upload endpoints'
+---
+
+## Overview
+
+The `S3MultipartController` provides three HTTP endpoints for managing the multipart upload lifecycle: creating uploads, signing part uploads, and completing uploads.
+
+**Namespace:** `MrEduar\S3M\Http\Controllers\S3MultipartController`
+
+**Base Route:** Configured in your routes file (typically `/s3m`)
+
+## Endpoints
+
+### POST /multipart
+
+Create a new multipart upload session.
+
+#### Request
+
+<ParamField body="bucket" type="string" optional>
+  Custom S3 bucket name (must have `allow_change_bucket` enabled in config)
+</ParamField>
+
+<ParamField body="visibility" type="string" optional default="private">
+  S3 ACL visibility (`private`, `public-read`, etc.)
+</ParamField>
+
+<ParamField body="content_type" type="string" optional default="application/octet-stream">
+  MIME type of the file being uploaded
+</ParamField>
+
+<ParamField body="folder" type="string" optional default="tmp">
+  Folder path within the bucket (must have `allow_change_folder` enabled in config)
+</ParamField>
+
+#### Response
+
+<Tabs>
+  <Tab title="Success (200)">
+    <ResponseField name="uuid" type="string">
+      Unique identifier for this upload session
+    </ResponseField>
+    
+    <ResponseField name="bucket" type="string">
+      S3 bucket name
+    </ResponseField>
+    
+    <ResponseField name="key" type="string">
+      S3 object key (file path: `folder/uuid`)
+    </ResponseField>
+    
+    <ResponseField name="uploadId" type="string">
+      AWS multipart upload ID (required for subsequent requests)
+    </ResponseField>
+
+    ```json
+    {
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "bucket": "my-bucket",
+      "key": "tmp/550e8400-e29b-41d4-a716-446655440000",
+      "uploadId": "exampleUploadId123"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Error (500)">
+    <ResponseField name="error" type="string">
+      Error message describing what went wrong
+    </ResponseField>
+
+    ```json
+    {
+      "error": "Unable to issue signed URL. Missing S3M config variables: region"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+#### Events
+
+Dispatches `MultipartUploadCreated` event with `uuid`, `bucket`, `key`, and `uploadId`.
+
+#### Example
+
+<CodeGroup>
+```javascript JavaScript
+const response = await fetch('/s3m/multipart', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-CSRF-TOKEN': csrfToken
+  },
+  body: JSON.stringify({
+    content_type: 'video/mp4',
+    folder: 'videos',
+    visibility: 'private'
+  })
+});
+
+const { uuid, bucket, key, uploadId } = await response.json();
+```
+
+```php PHP
+use Illuminate\Support\Facades\Http;
+
+$response = Http::post('/s3m/multipart', [
+    'content_type' => 'video/mp4',
+    'folder' => 'videos',
+    'visibility' => 'private'
+]);
+
+$data = $response->json();
+// ['uuid' => '...', 'bucket' => '...', 'key' => '...', 'uploadId' => '...']
+```
+</CodeGroup>
+
+---
+
+### POST /multipart/sign
+
+Generate a presigned URL for uploading a specific part of the file.
+
+#### Request
+
+<ParamField body="key" type="string" required>
+  S3 object key from the create upload response
+</ParamField>
+
+<ParamField body="part_number" type="integer" required>
+  Part number (starting from 1, max 10,000)
+</ParamField>
+
+<ParamField body="upload_id" type="string" required>
+  Upload ID from the create upload response
+</ParamField>
+
+<ParamField body="bucket" type="string" optional>
+  Custom S3 bucket name
+</ParamField>
+
+<ParamField body="visibility" type="string" optional>
+  S3 ACL visibility
+</ParamField>
+
+<ParamField body="content_type" type="string" optional default="application/octet-stream">
+  MIME type for this part
+</ParamField>
+
+#### Response
+
+<Tabs>
+  <Tab title="Success (201)">
+    <ResponseField name="bucket" type="string">
+      S3 bucket name
+    </ResponseField>
+    
+    <ResponseField name="key" type="string">
+      S3 object key
+    </ResponseField>
+    
+    <ResponseField name="url" type="string">
+      Presigned URL for uploading this part (valid for 5 minutes)
+    </ResponseField>
+    
+    <ResponseField name="headers" type="object">
+      HTTP headers to include in the upload request
+      
+      <ResponseField name="Content-Type" type="string">
+        Content type header value
+      </ResponseField>
+    </ResponseField>
+
+    ```json
+    {
+      "bucket": "my-bucket",
+      "key": "tmp/550e8400-e29b-41d4-a716-446655440000",
+      "url": "https://my-bucket.s3.amazonaws.com/tmp/550e8400...?X-Amz-Algorithm=AWS4-HMAC-SHA256&...",
+      "headers": {
+        "Content-Type": "video/mp4",
+        "Host": ["my-bucket.s3.amazonaws.com"]
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Error (500)">
+    <ResponseField name="error" type="string">
+      Error message
+    </ResponseField>
+
+    ```json
+    {
+      "error": "Invalid upload ID"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+#### Example
+
+<CodeGroup>
+```javascript JavaScript
+// Get presigned URL for part 1
+const signResponse = await fetch('/s3m/multipart/sign', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-CSRF-TOKEN': csrfToken
+  },
+  body: JSON.stringify({
+    key: key,
+    upload_id: uploadId,
+    part_number: 1,
+    content_type: 'video/mp4'
+  })
+});
+
+const { url, headers } = await signResponse.json();
+
+// Upload the part using the presigned URL
+const uploadResponse = await fetch(url, {
+  method: 'PUT',
+  headers: headers,
+  body: filePart
+});
+
+const etag = uploadResponse.headers.get('ETag');
+```
+
+```php PHP
+use Illuminate\Support\Facades\Http;
+
+$signResponse = Http::post('/s3m/multipart/sign', [
+    'key' => $key,
+    'upload_id' => $uploadId,
+    'part_number' => 1,
+    'content_type' => 'video/mp4'
+]);
+
+$data = $signResponse->json();
+$url = $data['url'];
+$headers = $data['headers'];
+```
+</CodeGroup>
+
+<Note>
+  Presigned URLs expire after 5 minutes. You must upload the part within this timeframe.
+</Note>
+
+---
+
+### POST /multipart/complete
+
+Complete the multipart upload by assembling all uploaded parts.
+
+#### Request
+
+<ParamField body="bucket" type="string" optional>
+  Custom S3 bucket name
+</ParamField>
+
+<ParamField body="key" type="string" required>
+  S3 object key from the create upload response
+</ParamField>
+
+<ParamField body="upload_id" type="string" required>
+  Upload ID from the create upload response
+</ParamField>
+
+<ParamField body="parts" type="array" required>
+  Array of uploaded parts with their ETags
+  
+  <ParamField body="parts[].PartNumber" type="integer" required>
+    Part number (must match the part_number used when uploading)
+  </ParamField>
+  
+  <ParamField body="parts[].ETag" type="string" required>
+    ETag value from the part upload response headers
+  </ParamField>
+</ParamField>
+
+#### Response
+
+<Tabs>
+  <Tab title="Success (200)">
+    <ResponseField name="url" type="string">
+      Public URL of the uploaded file
+    </ResponseField>
+    
+    <ResponseField name="key" type="string">
+      S3 object key
+    </ResponseField>
+
+    ```json
+    {
+      "url": "https://my-bucket.s3.amazonaws.com/tmp/550e8400-e29b-41d4-a716-446655440000",
+      "key": "tmp/550e8400-e29b-41d4-a716-446655440000"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Error (500)">
+    <ResponseField name="error" type="string">
+      Error message
+    </ResponseField>
+
+    ```json
+    {
+      "error": "One or more of the specified parts could not be found"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+#### Events
+
+Dispatches `MultipartUploadCompleted` event with `bucket`, `key`, `upload_id`, and `location`.
+
+#### Example
+
+<CodeGroup>
+```javascript JavaScript
+const completeResponse = await fetch('/s3m/multipart/complete', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-CSRF-TOKEN': csrfToken
+  },
+  body: JSON.stringify({
+    key: key,
+    upload_id: uploadId,
+    parts: [
+      { PartNumber: 1, ETag: '"etag-from-part-1"' },
+      { PartNumber: 2, ETag: '"etag-from-part-2"' },
+      { PartNumber: 3, ETag: '"etag-from-part-3"' }
+    ]
+  })
+});
+
+const { url, key: uploadedKey } = await completeResponse.json();
+console.log('File uploaded to:', url);
+```
+
+```php PHP
+use Illuminate\Support\Facades\Http;
+
+$response = Http::post('/s3m/multipart/complete', [
+    'key' => $key,
+    'upload_id' => $uploadId,
+    'parts' => [
+        ['PartNumber' => 1, 'ETag' => '"etag-from-part-1"'],
+        ['PartNumber' => 2, 'ETag' => '"etag-from-part-2"'],
+        ['PartNumber' => 3, 'ETag' => '"etag-from-part-3"'],
+    ]
+]);
+
+$data = $response->json();
+$fileUrl = $data['url'];
+```
+</CodeGroup>
+
+## Controller Methods
+
+### createMultipartUpload()
+
+```php
+public function createMultipartUpload(CreateMultipartUploadRequest $request): JsonResponse
+```
+
+See [POST /multipart](#post-multipart) endpoint documentation above.
+
+**Source:** /home/daytona/workspace/source/src/Http/Controllers/S3MultipartController.php:30
+
+---
+
+### signPartUpload()
+
+```php
+public function signPartUpload(SignPartRequest $request): JsonResponse
+```
+
+See [POST /multipart/sign](#post-multipart-sign) endpoint documentation above.
+
+**Source:** /home/daytona/workspace/source/src/Http/Controllers/S3MultipartController.php:68
+
+---
+
+### completeMultipartUpload()
+
+```php
+public function completeMultipartUpload(CompleteMultipartUploadRequest $request): JsonResponse
+```
+
+See [POST /multipart/complete](#post-multipart-complete) endpoint documentation above.
+
+**Source:** /home/daytona/workspace/source/src/Http/Controllers/S3MultipartController.php:102
+
+## Middleware
+
+The controller applies middleware configured in `config('s3m.middleware')`. By default, this includes authentication and CSRF protection.
+
+## Authorization
+
+All endpoints require authorization through the `uploadFiles` gate, which receives the authenticated user and bucket name.

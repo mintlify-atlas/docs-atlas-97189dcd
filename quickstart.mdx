@@ -1,80 +1,525 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with S3M by implementing your first multipart upload to AWS S3 from your Laravel application.
 ---
 
-## Get started in three steps
+## Overview
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide walks you through implementing your first multipart upload using S3M. You'll learn how to upload files directly from the browser to S3 and handle the response in your Laravel backend.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  Make sure you've completed the [Installation](/installation) steps before proceeding.
 </Note>
+
+## Step 1: Set Up Authorization
+
+Before users can upload files, you need to define who has permission to upload.
+
+<Steps>
+  <Step title="Create User Policy">
+    Generate a policy for your User model:
+
+    ```bash
+    php artisan make:policy UserPolicy --model=User
+    ```
+  </Step>
+
+  <Step title="Add Upload Permission">
+    Open `app/Policies/UserPolicy.php` and add the `uploadFiles` method:
+
+    ```php app/Policies/UserPolicy.php
+    <?php
+
+    namespace App\Policies;
+
+    use App\Models\User;
+
+    class UserPolicy
+    {
+        /**
+         * Determine whether the user can upload files.
+         *
+         * @param  \App\Models\User  $user
+         * @return mixed
+         */
+        public function uploadFiles(User $user)
+        {
+            return true; // Customize based on your needs
+        }
+    }
+    ```
+
+    <Tip>
+      Customize the authorization logic based on your requirements. For example, you might check user roles, subscription status, or storage quotas.
+    </Tip>
+  </Step>
+</Steps>
+
+## Step 2: Add Blade Directive
+
+Ensure the `@s3m` directive is in your layout file **before** your application's JavaScript:
+
+```blade resources/views/layouts/app.blade.php
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My App</title>
+</head>
+<body>
+    <div id="app">
+        @yield('content')
+    </div>
+
+    @s3m
+    <script src="{{ mix('js/app.js') }}"></script>
+</body>
+</html>
+```
+
+## Step 3: Create Upload Frontend
+
+Implement the file upload interface in your frontend JavaScript:
+
+<Tabs>
+  <Tab title="Vue 3">
+    ```vue resources/js/components/FileUpload.vue
+    <template>
+      <div>
+        <input 
+          type="file" 
+          ref="fileInput" 
+          @change="uploadFile"
+        />
+        
+        <div v-if="uploading">
+          <p>Upload Progress: {{ uploadProgress }}%</p>
+          <progress :value="uploadProgress" max="100"></progress>
+        </div>
+        
+        <div v-if="uploadComplete">
+          <p>Upload complete!</p>
+        </div>
+      </div>
+    </template>
+
+    <script setup>
+    import { ref } from 'vue'
+    import axios from 'axios'
+
+    const fileInput = ref(null)
+    const uploadProgress = ref(0)
+    const uploading = ref(false)
+    const uploadComplete = ref(false)
+
+    const uploadFile = (e) => {
+      const file = e.target.files[0]
+      
+      if (!file) return
+      
+      uploading.value = true
+      uploadComplete.value = false
+
+      s3m(file, {
+        progress: progress => {
+          uploadProgress.value = progress
+        }
+      }).then((response) => {
+        // Send file metadata to your backend
+        axios.post('/api/files', {
+          uuid: response.uuid,
+          key: response.key,
+          bucket: response.bucket,
+          name: file.name,
+          content_type: file.type,
+        }).then(() => {
+          uploading.value = false
+          uploadComplete.value = true
+        })
+      }).catch((error) => {
+        console.error('Upload failed:', error)
+        uploading.value = false
+      })
+    }
+    </script>
+    ```
+  </Tab>
+
+  <Tab title="React">
+    ```jsx resources/js/components/FileUpload.jsx
+    import React, { useState } from 'react'
+    import axios from 'axios'
+
+    export default function FileUpload() {
+      const [uploadProgress, setUploadProgress] = useState(0)
+      const [uploading, setUploading] = useState(false)
+      const [uploadComplete, setUploadComplete] = useState(false)
+
+      const handleFileChange = (e) => {
+        const file = e.target.files[0]
+        
+        if (!file) return
+        
+        setUploading(true)
+        setUploadComplete(false)
+
+        s3m(file, {
+          progress: progress => {
+            setUploadProgress(progress)
+          }
+        }).then((response) => {
+          // Send file metadata to your backend
+          axios.post('/api/files', {
+            uuid: response.uuid,
+            key: response.key,
+            bucket: response.bucket,
+            name: file.name,
+            content_type: file.type,
+          }).then(() => {
+            setUploading(false)
+            setUploadComplete(true)
+          })
+        }).catch((error) => {
+          console.error('Upload failed:', error)
+          setUploading(false)
+        })
+      }
+
+      return (
+        <div>
+          <input 
+            type="file" 
+            onChange={handleFileChange}
+          />
+          
+          {uploading && (
+            <div>
+              <p>Upload Progress: {uploadProgress}%</p>
+              <progress value={uploadProgress} max="100" />
+            </div>
+          )}
+          
+          {uploadComplete && (
+            <p>Upload complete!</p>
+          )}
+        </div>
+      )
+    }
+    ```
+  </Tab>
+
+  <Tab title="Vanilla JS">
+    ```html resources/views/upload.blade.php
+    <div>
+      <input type="file" id="fileInput" />
+      
+      <div id="progressContainer" style="display: none;">
+        <p>Upload Progress: <span id="progressText">0</span>%</p>
+        <progress id="progressBar" value="0" max="100"></progress>
+      </div>
+      
+      <div id="completeMessage" style="display: none;">
+        <p>Upload complete!</p>
+      </div>
+    </div>
+
+    <script>
+      document.getElementById('fileInput').addEventListener('change', (e) => {
+        const file = e.target.files[0]
+        
+        if (!file) return
+        
+        document.getElementById('progressContainer').style.display = 'block'
+        document.getElementById('completeMessage').style.display = 'none'
+
+        s3m(file, {
+          progress: progress => {
+            document.getElementById('progressText').textContent = progress
+            document.getElementById('progressBar').value = progress
+          }
+        }).then((response) => {
+          // Send file metadata to your backend
+          fetch('/api/files', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+            },
+            body: JSON.stringify({
+              uuid: response.uuid,
+              key: response.key,
+              bucket: response.bucket,
+              name: file.name,
+              content_type: file.type,
+            })
+          }).then(() => {
+            document.getElementById('progressContainer').style.display = 'none'
+            document.getElementById('completeMessage').style.display = 'block'
+          })
+        }).catch((error) => {
+          console.error('Upload failed:', error)
+        })
+      })
+    </script>
+    ```
+  </Tab>
+</Tabs>
+
+## Step 4: Handle Upload Response
+
+Create a backend endpoint to receive the upload metadata and move the file from temporary to permanent storage:
+
+```php app/Http/Controllers/FileController.php
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+
+class FileController extends Controller
+{
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'uuid' => 'required|string',
+            'key' => 'required|string',
+            'bucket' => 'required|string',
+            'name' => 'required|string',
+            'content_type' => 'required|string',
+        ]);
+
+        // Move file from tmp/ to permanent location
+        $permanentKey = str_replace('tmp/', 'files/', $validated['key']);
+        
+        Storage::copy(
+            $validated['key'],
+            $permanentKey
+        );
+
+        // Store file metadata in database
+        $file = auth()->user()->files()->create([
+            'uuid' => $validated['uuid'],
+            'key' => $permanentKey,
+            'bucket' => $validated['bucket'],
+            'name' => $validated['name'],
+            'content_type' => $validated['content_type'],
+        ]);
+
+        return response()->json([
+            'message' => 'File uploaded successfully',
+            'file' => $file,
+        ]);
+    }
+}
+```
+
+<Info>
+  Files are initially stored in the `tmp/` directory and should be moved to a permanent location after validation.
+</Info>
+
+## Step 5: Add Route
+
+Add the route to your `routes/api.php`:
+
+```php routes/api.php
+use App\Http\Controllers\FileController;
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/files', [FileController::class, 'store']);
+});
+```
+
+## Understanding the Response
+
+The `s3m()` function returns a promise that resolves with the following data:
+
+```typescript
+{
+  uuid: string,        // Unique identifier for the file
+  key: string,         // S3 object key (e.g., "tmp/uuid-here")
+  bucket: string,      // S3 bucket name
+  extension: string,   // File extension (e.g., "pdf")
+  name: string,        // Original filename
+  url: string          // S3 URL (if auto_complete is not false)
+}
+```
+
+## Advanced Options
+
+Customize the upload behavior with additional options:
+
+<Tabs>
+  <Tab title="Custom Visibility">
+    ```javascript
+    s3m(file, {
+      visibility: 'public-read', // Make file publicly accessible
+      progress: progress => {
+        console.log(progress)
+      }
+    }).then(response => {
+      // Handle response
+    })
+    ```
+
+    <Info>
+      This requires `allow_change_visibility` to be `true` in `config/s3m.php`.
+    </Info>
+  </Tab>
+
+  <Tab title="Custom Chunk Size">
+    ```javascript
+    s3m(file, {
+      chunk_size: 20 * 1024 * 1024, // 20MB chunks (default: 10MB)
+      progress: progress => {
+        console.log(progress)
+      }
+    }).then(response => {
+      // Handle response
+    })
+    ```
+
+    <Tip>
+      Larger chunks mean fewer HTTP requests but require more memory. Adjust based on your use case.
+    </Tip>
+  </Tab>
+
+  <Tab title="Custom Concurrent Uploads">
+    ```javascript
+    s3m(file, {
+      max_concurrent_uploads: 10, // Upload 10 parts simultaneously (default: 5)
+      progress: progress => {
+        console.log(progress)
+      }
+    }).then(response => {
+      // Handle response
+    })
+    ```
+
+    <Warning>
+      Higher concurrency can improve speed but may overwhelm slower connections.
+    </Warning>
+  </Tab>
+
+  <Tab title="Custom Retry Attempts">
+    ```javascript
+    s3m(file, {
+      chunk_retries: 5, // Retry failed chunks 5 times (default: 3)
+      progress: progress => {
+        console.log(progress)
+      }
+    }).then(response => {
+      // Handle response
+    })
+    ```
+  </Tab>
+
+  <Tab title="Additional Data">
+    ```javascript
+    s3m(file, {
+      data: {
+        folder: 'uploads/images', // Custom folder
+        bucket: 'my-custom-bucket', // Custom bucket
+      },
+      progress: progress => {
+        console.log(progress)
+      }
+    }).then(response => {
+      // Handle response
+    })
+    ```
+
+    <Info>
+      Custom folders require `allow_change_folder` to be `true` in `config/s3m.php`.
+    </Info>
+  </Tab>
+</Tabs>
+
+## Default Configuration
+
+S3M uses these default settings:
+
+<CodeGroup>
+  ```javascript Chunk Size
+  10 * 1024 * 1024 // 10MB per chunk
+  ```
+
+  ```javascript Max Concurrent Uploads
+  5 // Upload 5 chunks simultaneously
+  ```
+
+  ```javascript Chunk Retries
+  3 // Retry failed chunks up to 3 times
+  ```
+</CodeGroup>
+
+## Testing Your Upload
+
+<Steps>
+  <Step title="Start Your Application">
+    ```bash
+    php artisan serve
+    ```
+  </Step>
+
+  <Step title="Open in Browser">
+    Navigate to your upload page and select a file.
+  </Step>
+
+  <Step title="Monitor Progress">
+    Watch the progress bar as chunks upload to S3.
+  </Step>
+
+  <Step title="Verify in S3">
+    Check your S3 bucket's `tmp/` directory to see the uploaded file.
+  </Step>
+
+  <Step title="Check Backend">
+    Verify that your backend endpoint received the file metadata.
+  </Step>
+</Steps>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="CORS errors in browser console">
+    Make sure your S3 bucket has the correct CORS configuration. See the [Installation guide](/installation#configure-s3-bucket) for details.
+
+    The `ETag` header must be exposed:
+
+    ```json
+    "ExposeHeaders": ["ETag"]
+    ```
+  </Accordion>
+
+  <Accordion title="401 Unauthorized errors">
+    Check that:
+    1. Your `UserPolicy` has the `uploadFiles` method
+    2. The user is authenticated
+    3. The policy returns `true` for the current user
+  </Accordion>
+
+  <Accordion title="s3m is not defined">
+    Ensure the `@s3m` directive is in your layout **before** your application's JavaScript.
+  </Accordion>
+
+  <Accordion title="Files not appearing in S3">
+    Verify your AWS credentials in `.env` are correct and the IAM user has S3 write permissions.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authorization" icon="shield" href="/configuration/authorization">
+    Learn how to implement fine-grained upload permissions
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/options">
+    Explore all available configuration options
+  </Card>
+  <Card title="JavaScript API" icon="code" href="/api/javascript/s3m-class">
+    Deep dive into the JavaScript API reference
+  </Card>
+  <Card title="Backend Integration" icon="server" href="/usage/handling-uploads">
+    Learn how to process uploaded files in Laravel
+  </Card>
+</CardGroup>

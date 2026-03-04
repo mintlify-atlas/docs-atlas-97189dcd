@@ -1,0 +1,399 @@
+---
+title: JavaScript Usage
+description: Learn how to upload files from the browser using the s3m() function
+---
+
+## The s3m() Function
+
+The `s3m()` function is globally available after adding the `@s3m` Blade directive to your layout. It handles multipart uploads to S3 directly from the browser.
+
+### Basic Usage
+
+```html
+<input type="file" id="file" ref="file" @change="uploadFile">
+```
+
+```js
+const uploadFile = (e) => {
+    const file = e.target.files[0];
+
+    s3m(file, {
+        progress: progress => {
+            console.log(`Upload progress: ${progress}%`);
+        }
+    }).then((response) => {
+        console.log('Upload complete!', response);
+        // Send metadata to backend
+        axios.post('/api/files', {
+            uuid: response.uuid,
+            key: response.key,
+            name: response.name,
+        });
+    });
+};
+```
+
+## Configuration Options
+
+The `s3m()` function accepts a file and an options object:
+
+<ParamField path="file" type="File" required>
+  The file object to upload from an input element
+</ParamField>
+
+<ParamField path="options" type="object">
+  Configuration options for the upload
+</ParamField>
+
+### Available Options
+
+<ParamField path="progress" type="function">
+  Callback function that receives upload progress percentage (0-100)
+  
+  ```js
+  progress: (percent) => {
+      console.log(`${percent}% complete`);
+  }
+  ```
+</ParamField>
+
+<ParamField path="chunk_size" type="number" default="10485760">
+  Size of each chunk in bytes. Default is 10MB (10 * 1024 * 1024)
+  
+  ```js
+  chunk_size: 5 * 1024 * 1024 // 5MB chunks
+  ```
+</ParamField>
+
+<ParamField path="max_concurrent_uploads" type="number" default="5">
+  Maximum number of chunks to upload simultaneously
+  
+  ```js
+  max_concurrent_uploads: 3 // Upload 3 chunks at a time
+  ```
+</ParamField>
+
+<ParamField path="chunk_retries" type="number" default="3">
+  Number of times to retry a failed chunk upload
+  
+  ```js
+  chunk_retries: 5 // Retry failed chunks up to 5 times
+  ```
+</ParamField>
+
+<ParamField path="visibility" type="string" default="private">
+  S3 ACL visibility for the uploaded file. Options: `private`, `public-read`, `public-read-write`, `authenticated-read`
+  
+  ```js
+  visibility: 'public-read' // Make file publicly accessible
+  ```
+</ParamField>
+
+<ParamField path="auto_complete" type="boolean" default="true">
+  Whether to automatically complete the multipart upload. Set to `false` if you want to complete it manually on the backend
+  
+  ```js
+  auto_complete: false // Manual completion required
+  ```
+</ParamField>
+
+<ParamField path="data" type="object">
+  Additional data to send with the upload request (e.g., folder path, custom metadata)
+  
+  ```js
+  data: {
+      folder: 'documents',
+      user_id: 123
+  }
+  ```
+</ParamField>
+
+<ParamField path="baseURL" type="string">
+  Custom base URL for API requests. Useful for different environments
+  
+  ```js
+  baseURL: 'https://api.example.com'
+  ```
+</ParamField>
+
+<ParamField path="headers" type="object">
+  Custom headers to include with API requests
+  
+  ```js
+  headers: {
+      'X-Custom-Header': 'value'
+  }
+  ```
+</ParamField>
+
+<ParamField path="httpClient" type="object">
+  Custom HTTP client (defaults to axios)
+  
+  ```js
+  httpClient: customAxiosInstance
+  ```
+</ParamField>
+
+## Response Object
+
+The promise returns a response object with the following properties:
+
+<ParamField path="uuid" type="string">
+  Unique identifier for the uploaded file
+</ParamField>
+
+<ParamField path="key" type="string">
+  S3 key where the file is stored (e.g., `tmp/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d`)
+</ParamField>
+
+<ParamField path="name" type="string">
+  Original filename
+</ParamField>
+
+<ParamField path="extension" type="string">
+  File extension extracted from filename
+</ParamField>
+
+<ParamField path="url" type="string">
+  S3 URL of the uploaded file (only when `auto_complete: true`)
+</ParamField>
+
+<ParamField path="upload_id" type="string">
+  Multipart upload ID (only when `auto_complete: false`)
+</ParamField>
+
+<ParamField path="parts" type="array">
+  Array of uploaded parts with ETags (only when `auto_complete: false`)
+</ParamField>
+
+## Complete Examples
+
+<Tabs>
+  <Tab title="Vue 3 with Progress">
+    ```vue
+    <template>
+      <div>
+        <input type="file" @change="handleUpload" ref="fileInput" />
+        <div v-if="uploading">
+          <progress :value="uploadProgress" max="100"></progress>
+          <p>{{ uploadProgress }}% uploaded</p>
+        </div>
+      </div>
+    </template>
+
+    <script setup>
+    import { ref } from 'vue';
+    import axios from 'axios';
+
+    const uploading = ref(false);
+    const uploadProgress = ref(0);
+
+    const handleUpload = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      uploading.value = true;
+      uploadProgress.value = 0;
+
+      try {
+        const response = await s3m(file, {
+          progress: (percent) => {
+            uploadProgress.value = percent;
+          },
+          chunk_size: 5 * 1024 * 1024, // 5MB chunks
+          visibility: 'private',
+        });
+
+        // Send metadata to backend
+        await axios.post('/api/files', {
+          uuid: response.uuid,
+          key: response.key,
+          name: response.name,
+          extension: response.extension,
+        });
+
+        alert('Upload successful!');
+      } catch (error) {
+        console.error('Upload failed:', error);
+        alert('Upload failed. Please try again.');
+      } finally {
+        uploading.value = false;
+      }
+    };
+    </script>
+    ```
+  </Tab>
+
+  <Tab title="React with Progress">
+    ```jsx
+    import { useState } from 'react';
+    import axios from 'axios';
+
+    function FileUploader() {
+      const [uploading, setUploading] = useState(false);
+      const [progress, setProgress] = useState(0);
+
+      const handleUpload = async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        setUploading(true);
+        setProgress(0);
+
+        try {
+          const response = await s3m(file, {
+            progress: (percent) => {
+              setProgress(percent);
+            },
+            visibility: 'private',
+          });
+
+          // Send metadata to backend
+          await axios.post('/api/files', {
+            uuid: response.uuid,
+            key: response.key,
+            name: response.name,
+          });
+
+          alert('Upload successful!');
+        } catch (error) {
+          console.error('Upload failed:', error);
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      return (
+        <div>
+          <input type="file" onChange={handleUpload} />
+          {uploading && (
+            <div>
+              <progress value={progress} max="100" />
+              <p>{progress}% uploaded</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+    ```
+  </Tab>
+
+  <Tab title="Manual Completion">
+    ```js
+    const file = document.getElementById('file').files[0];
+
+    s3m(file, {
+      auto_complete: false,
+      progress: (percent) => {
+        console.log(`${percent}% complete`);
+      }
+    }).then(async (response) => {
+      // Upload complete, but not finalized
+      // Send to backend to complete
+      const result = await axios.post('/api/complete-upload', {
+        uuid: response.uuid,
+        key: response.key,
+        upload_id: response.upload_id,
+        parts: response.parts,
+        name: response.name,
+      });
+
+      console.log('Upload finalized:', result.data);
+    });
+    ```
+  </Tab>
+
+  <Tab title="Public File Upload">
+    ```js
+    const uploadFile = async (e) => {
+      const file = e.target.files[0];
+
+      const response = await s3m(file, {
+        visibility: 'public-read',
+        progress: (percent) => {
+          document.getElementById('progress').innerText = `${percent}%`;
+        }
+      });
+
+      // File is now publicly accessible
+      console.log('Public URL:', response.url);
+      
+      // Save to backend
+      await axios.post('/api/public-files', {
+        uuid: response.uuid,
+        key: response.key,
+        url: response.url,
+        name: response.name,
+      });
+    };
+    ```
+  </Tab>
+</Tabs>
+
+## Advanced Configuration
+
+### Custom Chunk Size for Large Files
+
+For very large files, you may want to increase the chunk size:
+
+```js
+s3m(file, {
+  chunk_size: 50 * 1024 * 1024, // 50MB chunks for files > 1GB
+  max_concurrent_uploads: 10,
+})
+```
+
+<Warning>
+Larger chunks reduce the number of requests but may be slower on unstable connections. Smaller chunks provide better retry granularity but increase the number of requests.
+</Warning>
+
+### Custom API Endpoint
+
+If your Laravel app is on a different domain:
+
+```js
+s3m(file, {
+  baseURL: 'https://api.myapp.com',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+  },
+})
+```
+
+### Additional Metadata
+
+Pass custom data to your backend during upload initialization:
+
+```js
+s3m(file, {
+  data: {
+    folder: 'invoices',
+    category: 'financial',
+    year: 2024,
+  },
+})
+```
+
+<Note>
+Custom data is sent during the multipart upload creation and can be accessed in your backend via the `CreateMultipartUploadRequest`.
+</Note>
+
+## Error Handling
+
+```js
+s3m(file, {
+  chunk_retries: 5,
+  progress: (percent) => {
+    console.log(`${percent}%`);
+  }
+})
+.then((response) => {
+  console.log('Success:', response);
+})
+.catch((error) => {
+  console.error('Upload failed:', error);
+  // Handle error (show user message, retry, etc.)
+});
+```
+
+Chunk uploads are automatically retried up to `chunk_retries` times (default: 3) before failing.

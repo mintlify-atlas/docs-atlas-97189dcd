@@ -1,97 +1,290 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: S3M Documentation
+description: Multipart uploads using Laravel and AWS S3 for handling large files in serverless environments
+mode: custom
 ---
 
-## Setting up
+<div className="relative overflow-hidden bg-gradient-to-br from-[#020627] via-[#0a1042] to-[#020627] dark:from-[#020627] dark:via-[#0a1042] dark:to-[#020627] py-20">
+  <div className="max-w-6xl mx-auto px-6 lg:px-8">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6">
+          Upload large files to S3 with ease
+        </h1>
+        <p className="text-base sm:text-lg lg:text-xl text-gray-300 dark:text-gray-300 max-w-2xl mb-8">
+          S3M handles multipart uploads for Laravel applications, breaking through the 5GB limit with parallel chunk uploads, automatic retries, and seamless serverless integration.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center justify-center px-6 py-3 text-base font-semibold text-white bg-[#529c3a] hover:bg-[#438230] rounded-lg transition-colors no-underline"
+          >
+            Get Started
+          </a>
+          <a 
+            href="/api/php/s3m-class" 
+            className="inline-flex items-center justify-center px-6 py-3 text-base font-semibold text-white bg-white/10 hover:bg-white/20 border border-white/30 rounded-lg transition-colors no-underline"
+          >
+            API Reference
+          </a>
+        </div>
+      </div>
+      <div className="lg:col-span-5 hidden lg:block">
+        <div className="relative">
+          <div className="absolute inset-0 bg-gradient-to-r from-[#529c3a]/20 to-[#848c8e]/20 blur-3xl"></div>
+          <div className="relative bg-[#303650] border border-[#60639d] rounded-xl p-6 shadow-2xl">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+            </div>
+            <pre className="text-sm text-gray-300 overflow-x-auto">
+              <code>{`s3m(file, {
+  progress: (percent) => {
+    console.log(percent);
+  }
+}).then((response) => {
+  // Upload complete!
+  console.log(response.url);
+});`}</code>
+            </pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+      Quick Start
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+      Get up and running with S3M in minutes
+    </p>
+  </div>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+  <Steps>
+    <Step title="Install via Composer">
+      Install the S3M package in your Laravel application:
 
-## Make it yours
+      ```bash
+      composer require mreduar/s3m
+      ```
 
-Design a docs site that looks great and empowers your users.
+      The package will automatically register its service provider.
+    </Step>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+    <Step title="Publish configuration">
+      Publish the S3M configuration file to customize settings:
 
-## Create beautiful pages
+      ```bash
+      php artisan vendor:publish --provider="MrEduar\S3M\S3MServiceProvider"
+      ```
 
-Everything you need to create world-class documentation.
+      This creates `config/s3m.php` where you can configure AWS credentials, bucket settings, and upload options.
+    </Step>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+    <Step title="Add the Blade directive">
+      Include the `@s3m` Blade directive in your layout file before your JavaScript:
 
-## Need inspiration?
+      ```blade
+      @s3m
+      <script src="{{ asset('js/app.js') }}"></script>
+      ```
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+      This makes the `s3m()` helper function available globally in your frontend.
+    </Step>
+
+    <Step title="Upload your first file">
+      Use the `s3m()` function in your JavaScript to upload files directly to S3:
+
+      ```javascript
+      const fileInput = document.querySelector('#file-input');
+      
+      fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        
+        s3m(file, {
+          progress: (percent) => {
+            console.log(`Upload progress: ${percent}%`);
+          }
+        }).then((response) => {
+          console.log('Upload complete!', response);
+          // Send metadata to your backend
+          axios.post('/api/files', {
+            uuid: response.uuid,
+            key: response.key,
+            bucket: response.bucket
+          });
+        });
+      });
+      ```
+
+      <Accordion title="Example response">
+        ```json
+        {
+          "uuid": "9d3e15e4-8b9a-4c7f-b2d1-6f4a8e9c1d2e",
+          "key": "tmp/9d3e15e4-8b9a-4c7f-b2d1-6f4a8e9c1d2e",
+          "bucket": "my-s3-bucket",
+          "extension": "pdf",
+          "name": "document.pdf",
+          "url": "https://my-s3-bucket.s3.amazonaws.com/tmp/9d3e15e4-8b9a-4c7f-b2d1-6f4a8e9c1d2e"
+        }
+        ```
+      </Accordion>
+    </Step>
+  </Steps>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+      Key Features
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+      Everything you need for robust file uploads
+    </p>
+  </div>
+
+  <CardGroup cols={2}>
+    <Card title="Multipart uploads" icon="cloud-arrow-up" href="/usage/javascript-usage">
+      Break through the 5GB S3 limit by splitting files into smaller chunks uploaded in parallel
+    </Card>
+    <Card title="Automatic retries" icon="rotate" href="/advanced/error-handling">
+      Configurable retry mechanism automatically handles failed chunk uploads without user intervention
+    </Card>
+    <Card title="Pre-signed URLs" icon="key" href="/configuration/authorization">
+      Secure direct-to-S3 uploads using pre-signed URLs with built-in authorization checks
+    </Card>
+    <Card title="Progress tracking" icon="chart-line" href="/usage/javascript-usage">
+      Real-time upload progress callbacks for building responsive UIs with accurate progress bars
+    </Card>
+    <Card title="Serverless ready" icon="server" href="/introduction">
+      Perfect for AWS Lambda and Laravel Vapor environments where local file storage isn't available
+    </Card>
+    <Card title="Event hooks" icon="bell" href="/api/events">
+      Listen to upload lifecycle events to integrate with your application's workflow
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+      Explore the documentation
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+      Find guides, API references, and advanced topics
+    </p>
+  </div>
+
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <a href="/configuration/aws-setup" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#848c8e] dark:hover:border-[#848c8e] overflow-hidden no-underline transition-colors">
+      <div className="h-56 overflow-hidden bg-gradient-to-br from-[#529c3a]/10 to-[#848c8e]/10 flex items-center justify-center">
+        <svg className="w-24 h-24 text-[#529c3a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      </div>
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2">
+          Configuration Guide
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Set up AWS credentials, configure S3 buckets, and customize upload behavior
+        </p>
+        <div className="flex items-center text-sm font-medium text-[#848c8e] group-hover:text-[#529c3a] transition-colors">
+          Read the guide
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/usage/php-usage" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#848c8e] dark:hover:border-[#848c8e] overflow-hidden no-underline transition-colors">
+      <div className="h-56 overflow-hidden bg-gradient-to-br from-[#848c8e]/10 to-[#529c3a]/10 flex items-center justify-center">
+        <svg className="w-24 h-24 text-[#848c8e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+        </svg>
+      </div>
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2">
+          Usage Examples
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Learn how to use S3M in both PHP backend and JavaScript frontend code
+        </p>
+        <div className="flex items-center text-sm font-medium text-[#848c8e] group-hover:text-[#529c3a] transition-colors">
+          View examples
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/api/php/s3m-class" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#848c8e] dark:hover:border-[#848c8e] overflow-hidden no-underline transition-colors">
+      <div className="h-56 overflow-hidden bg-gradient-to-br from-[#529c3a]/10 to-[#848c8e]/10 flex items-center justify-center">
+        <svg className="w-24 h-24 text-[#529c3a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
+      </div>
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2">
+          PHP API Reference
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Complete reference for the S3M PHP class, controller methods, and request validation
+        </p>
+        <div className="flex items-center text-sm font-medium text-[#848c8e] group-hover:text-[#529c3a] transition-colors">
+          Browse PHP API
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/api/javascript/s3m-class" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#848c8e] dark:hover:border-[#848c8e] overflow-hidden no-underline transition-colors">
+      <div className="h-56 overflow-hidden bg-gradient-to-br from-[#848c8e]/10 to-[#529c3a]/10 flex items-center justify-center">
+        <svg className="w-24 h-24 text-[#848c8e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+      </div>
+      <div className="p-6 bg-white dark:bg-[#1a1d27]">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2">
+          JavaScript API Reference
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Complete reference for the S3M JavaScript class, configuration options, and methods
+        </p>
+        <div className="flex items-center text-sm font-medium text-[#848c8e] group-hover:text-[#529c3a] transition-colors">
+          Browse JavaScript API
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="bg-gradient-to-r from-[#529c3a]/10 to-[#848c8e]/10 dark:from-[#529c3a]/10 dark:to-[#848c8e]/10 border border-gray-200 dark:border-[#27272a] rounded-2xl p-8 sm:p-12 text-center">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+      Ready to get started?
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto mb-8">
+      Follow our quickstart guide to install S3M and upload your first file in minutes.
+    </p>
+    <a 
+      href="/quickstart" 
+      className="inline-flex items-center justify-center px-6 py-3 text-base font-semibold text-white bg-[#529c3a] hover:bg-[#438230] rounded-lg transition-colors no-underline"
+    >
+      Get Started Now
+    </a>
+  </div>
+</div>

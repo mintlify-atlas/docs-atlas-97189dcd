@@ -1,0 +1,185 @@
+---
+title: 'AWS Setup'
+description: 'Configure AWS credentials and S3 bucket for multipart uploads'
+---
+
+## Overview
+
+S3M requires AWS credentials and an S3 bucket to handle multipart uploads. This guide walks you through setting up your AWS environment and configuring the necessary permissions.
+
+<Steps>
+  <Step title="Configure Environment Variables">
+    Add the following AWS credentials to your `.env` file:
+
+    ```bash
+    AWS_ACCESS_KEY_ID=your-access-key-id
+    AWS_SECRET_ACCESS_KEY=your-secret-access-key
+    AWS_DEFAULT_REGION=us-east-1
+    AWS_BUCKET=your-bucket-name
+    ```
+
+    <Note>
+      These environment variables are automatically loaded from the `config/s3m.php` configuration file.
+    </Note>
+  </Step>
+
+  <Step title="Optional AWS Configuration">
+    Depending on your setup, you may need additional AWS configuration:
+
+    ```bash
+    # Session token for temporary credentials
+    AWS_SESSION_TOKEN=your-session-token
+
+    # Custom S3 endpoint (for S3-compatible services)
+    AWS_ENDPOINT=https://s3.custom-endpoint.com
+
+    # Custom URL for accessing uploaded files
+    AWS_URL=https://your-cdn.cloudfront.net
+
+    # Use path-style endpoint (for S3-compatible services)
+    AWS_USE_PATH_STYLE_ENDPOINT=false
+    ```
+  </Step>
+
+  <Step title="Create S3 Bucket">
+    Create an S3 bucket in your AWS account:
+
+    1. Log in to the [AWS S3 Console](https://console.aws.amazon.com/s3/)
+    2. Click "Create bucket"
+    3. Enter a unique bucket name
+    4. Select your preferred region
+    5. Configure bucket settings (versioning, encryption, etc.)
+    6. Click "Create bucket"
+
+    <Warning>
+      Ensure your bucket name matches the value in `AWS_BUCKET` environment variable.
+    </Warning>
+  </Step>
+
+  <Step title="Configure Bucket Lifecycle">
+    Set up a lifecycle rule to automatically delete temporary files:
+
+    1. Navigate to your bucket in the S3 Console
+    2. Go to "Management" tab
+    3. Click "Create lifecycle rule"
+    4. Name: "Delete temporary uploads"
+    5. Apply to prefix: `tmp/`
+    6. Enable "Expire current versions of objects"
+    7. Set to 1 day after object creation
+    8. Save the rule
+
+    <Info>
+      This automatically cleans up incomplete uploads in the `/tmp/` directory after 24 hours.
+    </Info>
+  </Step>
+</Steps>
+
+## IAM Permissions
+
+Your AWS IAM user or role needs the following S3 permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateMultipartUpload",
+        "s3:UploadPart",
+        "s3:CompleteMultipartUpload",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts",
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-bucket-name/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-bucket-name"
+      ]
+    }
+  ]
+}
+```
+
+<Warning>
+  Replace `your-bucket-name` with your actual bucket name in the IAM policy.
+</Warning>
+
+## S3 Configuration Reference
+
+The S3 configuration is defined in `config/s3m.php`:
+
+<CodeGroup>
+```php config/s3m.php
+'s3' => [
+    'key' => env('AWS_ACCESS_KEY_ID'),
+    'secret' => env('AWS_SECRET_ACCESS_KEY'),
+    'token' => env('AWS_SESSION_TOKEN'),
+    'region' => env('AWS_DEFAULT_REGION'),
+    'bucket' => env('AWS_BUCKET'),
+    'url' => env('AWS_URL'),
+    'endpoint' => env('AWS_ENDPOINT'),
+    'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+],
+```
+</CodeGroup>
+
+### Configuration Parameters
+
+<ParamField path="key" type="string" required>
+  AWS Access Key ID for authentication
+</ParamField>
+
+<ParamField path="secret" type="string" required>
+  AWS Secret Access Key for authentication
+</ParamField>
+
+<ParamField path="token" type="string">
+  AWS Session Token for temporary credentials (optional)
+</ParamField>
+
+<ParamField path="region" type="string" required>
+  AWS region where your S3 bucket is located (e.g., `us-east-1`)
+</ParamField>
+
+<ParamField path="bucket" type="string" required>
+  Name of the S3 bucket for uploads
+</ParamField>
+
+<ParamField path="url" type="string">
+  Custom URL for accessing uploaded files (useful for CDN integration)
+</ParamField>
+
+<ParamField path="endpoint" type="string">
+  Custom S3 endpoint for S3-compatible services (e.g., MinIO, DigitalOcean Spaces)
+</ParamField>
+
+<ParamField path="use_path_style_endpoint" type="boolean" default="false">
+  Use path-style endpoint instead of virtual-hosted-style (required for some S3-compatible services)
+</ParamField>
+
+## Verifying Your Setup
+
+Test your AWS configuration by running:
+
+```bash
+php artisan tinker
+```
+
+Then execute:
+
+```php
+MrEduar\S3M\Facades\S3M::storageClient()->listBuckets();
+```
+
+If configured correctly, this will return a list of your S3 buckets.

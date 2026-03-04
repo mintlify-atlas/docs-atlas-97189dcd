@@ -1,0 +1,413 @@
+---
+title: 'Methods'
+description: 'S3M JavaScript class methods reference'
+---
+
+## Overview
+
+The S3M class provides several methods for managing multipart uploads to AWS S3.
+
+## upload()
+
+Main method that orchestrates the entire upload process.
+
+```javascript
+const result = await uploader.upload();
+```
+
+### Returns
+
+<ResponseField name="Promise<Object>" type="Promise">
+  Returns a promise that resolves to an object containing upload information.
+</ResponseField>
+
+### Return Object (auto_complete: true)
+
+<ResponseField name="uuid" type="string">
+  Unique identifier for the upload.
+</ResponseField>
+
+<ResponseField name="key" type="string">
+  S3 object key where the file is stored.
+</ResponseField>
+
+<ResponseField name="extension" type="string">
+  File extension extracted from the filename.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Original filename.
+</ResponseField>
+
+<ResponseField name="url" type="string">
+  Public URL of the uploaded file.
+</ResponseField>
+
+### Return Object (auto_complete: false)
+
+<ResponseField name="uuid" type="string">
+  Unique identifier for the upload.
+</ResponseField>
+
+<ResponseField name="key" type="string">
+  S3 object key where the file is stored.
+</ResponseField>
+
+<ResponseField name="extension" type="string">
+  File extension extracted from the filename.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Original filename.
+</ResponseField>
+
+<ResponseField name="upload_id" type="string">
+  AWS S3 upload ID for the multipart upload.
+</ResponseField>
+
+<ResponseField name="parts" type="Array<Object>">
+  Array of uploaded parts with ETag and PartNumber.
+</ResponseField>
+
+### Example
+
+```javascript
+const uploader = new S3M(file, {
+  progress: (percent) => console.log(`${percent}%`)
+});
+
+const result = await uploader.upload();
+console.log('Uploaded to:', result.url);
+console.log('File UUID:', result.uuid);
+```
+
+---
+
+## startUpload()
+
+Initiates a multipart upload and gets the upload ID from AWS S3.
+
+```javascript
+const { key, uploadId, uuid } = await uploader.startUpload();
+```
+
+### Returns
+
+<ResponseField name="Promise<Object>" type="Promise">
+  Promise that resolves to an object with upload initialization data.
+</ResponseField>
+
+### Return Fields
+
+<ResponseField name="key" type="string">
+  S3 object key for the file.
+</ResponseField>
+
+<ResponseField name="uploadId" type="string">
+  AWS S3 multipart upload ID.
+</ResponseField>
+
+<ResponseField name="uuid" type="string">
+  Unique identifier for the upload.
+</ResponseField>
+
+### Example
+
+```javascript
+const uploader = new S3M(file);
+const { key, uploadId, uuid } = await uploader.startUpload();
+console.log('Upload started with ID:', uploadId);
+```
+
+### Throws
+
+- `Error` - If filename is empty
+
+---
+
+## uploadChunks()
+
+Uploads the file in chunks with concurrent upload management.
+
+```javascript
+const parts = await uploader.uploadChunks(key, uploadId, updateProgress);
+```
+
+### Parameters
+
+<ParamField path="key" type="string" required>
+  S3 object key for the file.
+</ParamField>
+
+<ParamField path="uploadId" type="string" required>
+  AWS S3 multipart upload ID.
+</ParamField>
+
+<ParamField path="updateProgress" type="Function" required>
+  Callback function to receive progress updates.
+  
+  **Signature:** `(percent: number) => void`
+</ParamField>
+
+### Returns
+
+<ResponseField name="Promise<Array>" type="Promise">
+  Promise that resolves to an array of uploaded parts, sorted by PartNumber.
+  
+  Each part object contains:
+  - `ETag` (string): Entity tag from S3
+  - `PartNumber` (number): Part number (1-indexed)
+</ResponseField>
+
+### Example
+
+```javascript
+const { key, uploadId } = await uploader.startUpload();
+const parts = await uploader.uploadChunks(key, uploadId, (percent) => {
+  console.log(`Progress: ${percent}%`);
+});
+console.log(`Uploaded ${parts.length} parts`);
+```
+
+---
+
+## uploadChunk()
+
+Uploads a single chunk with retry logic.
+
+```javascript
+const part = await uploader.uploadChunk(
+  key,
+  uploadId,
+  partNumber,
+  chunk,
+  totalChunks,
+  progress,
+  updateProgress
+);
+```
+
+### Parameters
+
+<ParamField path="key" type="string" required>
+  S3 object key for the file.
+</ParamField>
+
+<ParamField path="uploadId" type="string" required>
+  AWS S3 multipart upload ID.
+</ParamField>
+
+<ParamField path="partNumber" type="number" required>
+  Part number (1-indexed).
+</ParamField>
+
+<ParamField path="chunk" type="Blob" required>
+  Blob containing the chunk data.
+</ParamField>
+
+<ParamField path="totalChunks" type="number" required>
+  Total number of chunks in the upload.
+</ParamField>
+
+<ParamField path="progress" type="Array" required>
+  Array tracking progress of all chunks.
+</ParamField>
+
+<ParamField path="updateProgress" type="Function" required>
+  Callback function to receive progress updates.
+</ParamField>
+
+### Returns
+
+<ResponseField name="Promise<Object>" type="Promise">
+  Promise that resolves to a part object.
+</ResponseField>
+
+### Return Fields
+
+<ResponseField name="ETag" type="string">
+  Entity tag from S3 response headers.
+</ResponseField>
+
+<ResponseField name="PartNumber" type="number">
+  Part number that was uploaded.
+</ResponseField>
+
+### Behavior
+
+- Automatically retries failed uploads up to `chunk_retries` times
+- Logs warnings when retrying
+- Throws error if all retries are exhausted
+
+---
+
+## completeUpload()
+
+Completes the multipart upload on AWS S3.
+
+```javascript
+const url = await uploader.completeUpload(key, uploadId, parts);
+```
+
+### Parameters
+
+<ParamField path="key" type="string" required>
+  S3 object key for the file.
+</ParamField>
+
+<ParamField path="uploadId" type="string" required>
+  AWS S3 multipart upload ID.
+</ParamField>
+
+<ParamField path="parts" type="Array" required>
+  Array of uploaded parts with ETag and PartNumber.
+</ParamField>
+
+### Returns
+
+<ResponseField name="Promise<string>" type="Promise">
+  Promise that resolves to the public URL of the uploaded file.
+</ResponseField>
+
+### Example
+
+```javascript
+const { key, uploadId } = await uploader.startUpload();
+const parts = await uploader.uploadChunks(key, uploadId, () => {});
+const url = await uploader.completeUpload(key, uploadId, parts);
+console.log('File available at:', url);
+```
+
+---
+
+## getSignUrl()
+
+Gets a pre-signed URL from the backend for uploading a specific part.
+
+```javascript
+const signedUrl = await uploader.getSignUrl(key, uploadId, partNumber);
+```
+
+### Parameters
+
+<ParamField path="key" type="string" required>
+  S3 object key for the file.
+</ParamField>
+
+<ParamField path="uploadId" type="string" required>
+  AWS S3 multipart upload ID.
+</ParamField>
+
+<ParamField path="partNumber" type="number" required>
+  Part number to get signed URL for (1-indexed).
+</ParamField>
+
+### Returns
+
+<ResponseField name="Promise<string>" type="Promise">
+  Promise that resolves to the pre-signed S3 upload URL.
+</ResponseField>
+
+### Example
+
+```javascript
+const signedUrl = await uploader.getSignUrl('my-file-key', 'upload-123', 1);
+console.log('Signed URL:', signedUrl);
+```
+
+---
+
+## handleUploadProgress()
+
+Handles progress events from chunk uploads and calculates overall progress.
+
+```javascript
+uploader.handleUploadProgress(event, totalChunks, chunkIndex, progress, updateProgress);
+```
+
+### Parameters
+
+<ParamField path="event" type="ProgressEvent" required>
+  Progress event from axios upload.
+  
+  Contains `loaded` and `total` properties.
+</ParamField>
+
+<ParamField path="totalChunks" type="number" required>
+  Total number of chunks in the upload.
+</ParamField>
+
+<ParamField path="chunkIndex" type="number" required>
+  Index of the current chunk (0-indexed).
+</ParamField>
+
+<ParamField path="progress" type="Array" required>
+  Array tracking progress percentage of each chunk.
+</ParamField>
+
+<ParamField path="updateProgress" type="Function" required>
+  Callback function to receive overall progress updates.
+  
+  **Signature:** `(percent: number) => void`
+</ParamField>
+
+### Returns
+
+This method returns `void` and updates the progress array and calls the callback.
+
+### Behavior
+
+1. Calculates the progress percentage for the current chunk
+2. Updates the progress array at the chunk's index
+3. Calculates overall progress as the average of all chunks
+4. Calls the `updateProgress` callback with the overall percentage
+
+---
+
+## Helper Function: s3m()
+
+Convenience function that creates an S3M instance and immediately starts the upload.
+
+```javascript
+import { s3m } from '@savannabits/s3m';
+
+const result = await s3m(file, options);
+```
+
+### Parameters
+
+<ParamField path="file" type="File" required>
+  File object to upload.
+</ParamField>
+
+<ParamField path="options" type="Object">
+  Configuration options (same as S3M constructor).
+</ParamField>
+
+### Returns
+
+Returns the same result as calling `new S3M(file, options).upload()`.
+
+### Example
+
+```javascript
+import { s3m } from '@savannabits/s3m';
+
+const file = document.getElementById('file-input').files[0];
+
+const result = await s3m(file, {
+  chunk_size: 5 * 1024 * 1024,
+  progress: (percent) => {
+    console.log(`Upload: ${percent}%`);
+  }
+});
+
+console.log('Uploaded:', result.url);
+```
+
+---
+
+## Related
+
+- [S3M Class](/api/javascript/s3m-class)
+- [Options Reference](/api/javascript/options)

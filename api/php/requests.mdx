@@ -1,0 +1,420 @@
+---
+title: 'Request Validation'
+description: 'Form request classes for validating multipart upload operations'
+---
+
+## Overview
+
+The S3M package includes three FormRequest classes that handle validation and authorization for multipart upload operations. Each request class validates specific parameters and enforces configuration-based restrictions.
+
+**Namespace:** `MrEduar\S3M\Http\Requests`
+
+## CreateMultipartUploadRequest
+
+Validates requests to create a new multipart upload session.
+
+**Used by:** `POST /multipart` endpoint
+
+### Authorization
+
+All users must be authorized through the `uploadFiles` gate:
+
+```php
+Gate::allows('uploadFiles', [$user, $bucket])
+```
+
+### Validation Rules
+
+<ParamField path="bucket" type="string" optional>
+  Custom S3 bucket name
+  
+  **Constraints:**
+  - Must be a string
+  - Can only be provided if `config('s3m.allow_change_bucket')` is `true`
+  - Validation error if attempting to change bucket when disabled
+</ParamField>
+
+<ParamField path="visibility" type="string" optional>
+  S3 ACL visibility setting
+  
+  **Constraints:**
+  - Must be a string
+  - Must be `private` if `config('s3m.allow_change_visibility')` is `false`
+  - Validation error if attempting to change visibility when disabled
+</ParamField>
+
+<ParamField path="content_type" type="string" optional>
+  MIME type of the file being uploaded
+  
+  **Constraints:**
+  - Must be a string
+  - No additional restrictions
+</ParamField>
+
+<ParamField path="folder" type="string" optional>
+  Folder path within the bucket
+  
+  **Constraints:**
+  - Must be a string
+  - Must be `tmp` if `config('s3m.allow_change_folder')` is `false`
+  - Validation error if attempting to change folder when disabled
+</ParamField>
+
+### Example Usage
+
+<CodeGroup>
+```php Valid Request
+// With default settings (all restrictions enabled)
+[
+    'content_type' => 'video/mp4',
+    'visibility' => 'private',
+    'folder' => 'tmp'
+]
+```
+
+```php Custom Bucket (Requires Config)
+// Only works if config('s3m.allow_change_bucket') === true
+[
+    'bucket' => 'custom-bucket',
+    'content_type' => 'image/jpeg'
+]
+```
+
+```php Custom Visibility (Requires Config)
+// Only works if config('s3m.allow_change_visibility') === true
+[
+    'visibility' => 'public-read',
+    'content_type' => 'image/png'
+]
+```
+</CodeGroup>
+
+### Validation Errors
+
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "bucket": [
+      "You are not allowed to change the bucket of the uploaded file."
+    ],
+    "visibility": [
+      "You are not allowed to change the visibility of the uploaded file."
+    ],
+    "folder": [
+      "You are not allowed to change the folder of the uploaded file."
+    ]
+  }
+}
+```
+
+**Source:** /home/daytona/workspace/source/src/Http/Requests/CreateMultipartUploadRequest.php:8
+
+---
+
+## SignPartRequest
+
+Validates requests to generate presigned URLs for uploading file parts.
+
+**Used by:** `POST /multipart/sign` endpoint
+
+### Authorization
+
+All users must be authorized through the `uploadFiles` gate:
+
+```php
+Gate::allows('uploadFiles', [$user, $bucket])
+```
+
+### Validation Rules
+
+<ParamField path="key" type="string" required>
+  S3 object key (file path) from the create upload response
+  
+  **Constraints:**
+  - Required field
+  - Must be a string
+</ParamField>
+
+<ParamField path="part_number" type="integer" required>
+  Part number for this upload chunk
+  
+  **Constraints:**
+  - Required field
+  - Must be an integer
+  - AWS S3 allows part numbers from 1 to 10,000
+</ParamField>
+
+<ParamField path="upload_id" type="string" required>
+  Upload ID from the create upload response
+  
+  **Constraints:**
+  - Required field
+  - Must be a string
+</ParamField>
+
+<ParamField path="bucket" type="string" optional>
+  Custom S3 bucket name
+  
+  **Constraints:**
+  - Must be a string
+  - No config restrictions for this request
+</ParamField>
+
+<ParamField path="visibility" type="string" optional>
+  S3 ACL visibility setting
+  
+  **Constraints:**
+  - Must be a string
+  - Must be `private` if `config('s3m.allow_change_visibility')` is `false`
+  - Validation error if attempting to change visibility when disabled
+</ParamField>
+
+<ParamField path="content_type" type="string" optional>
+  MIME type for this part
+  
+  **Constraints:**
+  - Must be a string
+  - No additional restrictions
+</ParamField>
+
+### Example Usage
+
+<CodeGroup>
+```php Minimal Request
+[
+    'key' => 'tmp/550e8400-e29b-41d4-a716-446655440000',
+    'part_number' => 1,
+    'upload_id' => 'exampleUploadId123'
+]
+```
+
+```php With Content Type
+[
+    'key' => 'videos/550e8400-e29b-41d4-a716-446655440000',
+    'part_number' => 2,
+    'upload_id' => 'exampleUploadId123',
+    'content_type' => 'video/mp4'
+]
+```
+
+```php Custom Bucket
+[
+    'key' => 'tmp/550e8400-e29b-41d4-a716-446655440000',
+    'part_number' => 3,
+    'upload_id' => 'exampleUploadId123',
+    'bucket' => 'custom-bucket'
+]
+```
+</CodeGroup>
+
+### Validation Errors
+
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "key": ["The key field is required."],
+    "part_number": ["The part number field is required."],
+    "upload_id": ["The upload id field is required."]
+  }
+}
+```
+
+**Source:** /home/daytona/workspace/source/src/Http/Requests/SignPartRequest.php:8
+
+---
+
+## CompleteMultipartUploadRequest
+
+Validates requests to complete a multipart upload and assemble all parts.
+
+**Used by:** `POST /multipart/complete` endpoint
+
+### Authorization
+
+All users must be authorized through the `uploadFiles` gate:
+
+```php
+Gate::allows('uploadFiles', [$user, $bucket])
+```
+
+### Validation Rules
+
+<ParamField path="bucket" type="string" optional>
+  Custom S3 bucket name
+  
+  **Constraints:**
+  - Must be a string
+  - Can only be provided if `config('s3m.allow_change_bucket')` is `true`
+  - Validation error if attempting to change bucket when disabled
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  S3 object key (file path) from the create upload response
+  
+  **Constraints:**
+  - Required field
+  - Must be a string
+</ParamField>
+
+<ParamField path="upload_id" type="string" required>
+  Upload ID from the create upload response
+  
+  **Constraints:**
+  - Required field
+  - Must be a string
+</ParamField>
+
+<ParamField path="parts" type="array" required>
+  Array of uploaded parts with their ETags
+  
+  **Constraints:**
+  - Required field
+  - Must be an array
+  - Each element must contain `PartNumber` and `ETag`
+</ParamField>
+
+<ParamField path="parts[].PartNumber" type="integer" required>
+  Part number (must match the number used when uploading)
+  
+  **Constraints:**
+  - Required field
+  - Must be an integer
+</ParamField>
+
+<ParamField path="parts[].ETag" type="string" required>
+  ETag value from the part upload response headers
+  
+  **Constraints:**
+  - Required field
+  - Must be a string
+  - Usually includes surrounding quotes (e.g., `"abc123"`)
+</ParamField>
+
+### Example Usage
+
+<CodeGroup>
+```php Single Part Upload
+[
+    'key' => 'tmp/550e8400-e29b-41d4-a716-446655440000',
+    'upload_id' => 'exampleUploadId123',
+    'parts' => [
+        ['PartNumber' => 1, 'ETag' => '"5d41402abc4b2a76b9719d911017c592"']
+    ]
+]
+```
+
+```php Multi-Part Upload
+[
+    'key' => 'videos/550e8400-e29b-41d4-a716-446655440000',
+    'upload_id' => 'exampleUploadId123',
+    'parts' => [
+        ['PartNumber' => 1, 'ETag' => '"etag-part-1"'],
+        ['PartNumber' => 2, 'ETag' => '"etag-part-2"'],
+        ['PartNumber' => 3, 'ETag' => '"etag-part-3"'],
+        ['PartNumber' => 4, 'ETag' => '"etag-part-4"']
+    ]
+]
+```
+
+```php Custom Bucket
+[
+    'bucket' => 'custom-bucket',
+    'key' => 'tmp/550e8400-e29b-41d4-a716-446655440000',
+    'upload_id' => 'exampleUploadId123',
+    'parts' => [
+        ['PartNumber' => 1, 'ETag' => '"etag-value"']
+    ]
+]
+```
+</CodeGroup>
+
+### Validation Errors
+
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "key": ["The key field is required."],
+    "upload_id": ["The upload id field is required."],
+    "parts": ["The parts field is required."],
+    "parts.0.PartNumber": ["The parts.0.PartNumber field is required."],
+    "parts.0.ETag": ["The parts.0.ETag field is required."]
+  }
+}
+```
+
+**Source:** /home/daytona/workspace/source/src/Http/Requests/CompleteMultipartUploadRequest.php:8
+
+---
+
+## Configuration Impact
+
+The request validation behavior is controlled by these configuration options:
+
+### allow_change_bucket
+
+**Config:** `config('s3m.allow_change_bucket')`
+
+**Default:** `false`
+
+**Impact:**
+- When `false`: Users cannot specify a custom bucket in `CreateMultipartUploadRequest` or `CompleteMultipartUploadRequest`
+- When `true`: Users can specify any bucket they have access to
+
+```php
+// config/s3m.php
+'allow_change_bucket' => env('S3M_ALLOW_CHANGE_BUCKET', false),
+```
+
+### allow_change_visibility
+
+**Config:** `config('s3m.allow_change_visibility')`
+
+**Default:** `false`
+
+**Impact:**
+- When `false`: Visibility must be `private` in all requests
+- When `true`: Users can specify any S3 ACL value (`public-read`, `authenticated-read`, etc.)
+
+```php
+// config/s3m.php
+'allow_change_visibility' => env('S3M_ALLOW_CHANGE_VISIBILITY', false),
+```
+
+### allow_change_folder
+
+**Config:** `config('s3m.allow_change_folder')`
+
+**Default:** `false`
+
+**Impact:**
+- When `false`: Folder must be `tmp` in `CreateMultipartUploadRequest`
+- When `true`: Users can specify any folder path
+
+```php
+// config/s3m.php
+'allow_change_folder' => env('S3M_ALLOW_CHANGE_FOLDER', false),
+```
+
+## Custom Authorization
+
+To customize authorization logic, define the `uploadFiles` gate in your `AuthServiceProvider`:
+
+```php
+use Illuminate\Support\Facades\Gate;
+
+public function boot()
+{
+    Gate::define('uploadFiles', function ($user, $bucket) {
+        // Custom authorization logic
+        if ($user->isAdmin()) {
+            return true;
+        }
+        
+        // Check if user has access to this specific bucket
+        return $user->buckets->contains('name', $bucket);
+    });
+}
+```

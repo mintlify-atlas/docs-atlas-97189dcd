@@ -1,0 +1,524 @@
+---
+title: Handling Uploads
+description: Complete workflow from frontend upload to backend storage and metadata management
+---
+
+## Complete Upload Workflow
+
+This guide walks through the entire process of uploading files from the frontend to S3 and handling them on the backend.
+
+## Step 1: Frontend Upload
+
+Initiate the upload from your frontend application:
+
+```html
+<input type="file" id="file" ref="file" @change="uploadFile">
+<div v-if="uploading">
+  <progress :value="uploadProgress" max="100"></progress>
+  <span>{{ uploadProgress }}%</span>
+</div>
+```
+
+```js
+const uploadFile = (e) => {
+    const file = e.target.files[0];
+
+    s3m(file, {
+        progress: progress => {
+            uploadProgress.value = progress;
+        }
+    }).then((response) => {
+        axios.post('/api/profile-photo', {
+            uuid: response.uuid,
+            key: response.key,
+            bucket: response.bucket,
+            name: file.name,
+            content_type: file.type,
+        })
+    });
+};
+```
+
+<Note>
+All uploaded files are initially placed in the `tmp/` directory of your S3 bucket. This directory should be configured to automatically purge files older than 24 hours.
+</Note>
+
+## Step 2: Backend Acknowledgment
+
+Receive the upload notification and process the file:
+
+<CodeGroup>
+
+```php Controller
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+
+public function storeProfilePhoto(Request $request)
+{
+    $validated = $request->validate([
+        'uuid' => 'required|uuid',
+        'key' => 'required|string',
+        'name' => 'required|string',
+        'content_type' => 'required|string',
+    ]);
+
+    // Move file from tmp to permanent location
+    $permanentKey = str_replace('tmp/', 'profile-photos/', $validated['key']);
+    
+    Storage::copy($validated['key'], $permanentKey);
+
+    // Update user record
+    $request->user()->update([
+        'profile_photo_path' => $permanentKey,
+    ]);
+
+    // Clean up tmp file
+    Storage::delete($validated['key']);
+
+    return response()->json([
+        'message' => 'Profile photo updated',
+        'url' => Storage::url($permanentKey),
+    ]);
+}
+```
+
+```php Route
+Route::middleware('auth')->group(function () {
+    Route::post('/api/profile-photo', [ProfileController::class, 'storeProfilePhoto']);
+});
+```
+
+</CodeGroup>
+
+## Step 3: Moving from Tmp Directory
+
+Files uploaded to S3 are stored in `tmp/` by default. Move them to permanent storage:
+
+### Simple Move
+
+```php
+use Illuminate\Support\Facades\Storage;
+
+Storage::copy(
+    $request->input('key'),
+    str_replace('tmp/', '', $request->input('key'))
+);
+```
+
+### Organized Storage
+
+Organize files into specific directories:
+
+```php
+// Original: tmp/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+// New: documents/2024/03/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+
+$uuid = $request->input('uuid');
+$year = date('Y');
+$month = date('m');
+
+$newKey = "documents/{$year}/{$month}/{$uuid}";
+
+Storage::copy($request->input('key'), $newKey);
+```
+
+### Preserve Original Filename
+
+```php
+$uuid = $request->input('uuid');
+$originalName = $request->input('name');
+$extension = pathinfo($originalName, PATHINFO_EXTENSION);
+
+$newKey = "uploads/{$uuid}.{$extension}";
+
+Storage::copy($request->input('key'), $newKey);
+```
+
+<Warning>
+Always delete the temporary file after copying to avoid storage costs:
+
+```php
+Storage::delete($request->input('key'));
+```
+</Warning>
+
+## Step 4: Storing File Metadata
+
+Store information about the uploaded file in your database:
+
+<CodeGroup>
+
+```php Migration
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up()
+    {
+        Schema::create('uploads', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->uuid('uuid')->unique();
+            $table->string('filename');
+            $table->string('mime_type');
+            $table->string('s3_key');
+            $table->unsignedBigInteger('size')->nullable();
+            $table->string('visibility')->default('private');
+            $table->timestamps();
+        });
+    }
+
+    public function down()
+    {
+        Schema::dropIfExists('uploads');
+    }
+};
+```
+
+```php Model
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
+
+class Upload extends Model
+{
+    protected $fillable = [
+        'user_id',
+        'uuid',
+        'filename',
+        'mime_type',
+        's3_key',
+        'size',
+        'visibility',
+    ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function getUrlAttribute()
+    {
+        return Storage::url($this->s3_key);
+    }
+
+    public function delete()
+    {
+        // Delete from S3 when model is deleted
+        Storage::delete($this->s3_key);
+        
+        return parent::delete();
+    }
+}
+```
+
+```php Controller with Metadata
+use App\Models\Upload;
+use Illuminate\Support\Facades\Storage;
+
+public function store(Request $request)
+{
+    $validated = $request->validate([
+        'uuid' => 'required|uuid',
+        'key' => 'required|string',
+        'name' => 'required|string',
+        'content_type' => 'required|string',
+        'size' => 'nullable|integer',
+    ]);
+
+    // Move from tmp to permanent storage
+    $permanentKey = str_replace('tmp/', 'uploads/', $validated['key']);
+    Storage::copy($validated['key'], $permanentKey);
+
+    // Create database record
+    $upload = Upload::create([
+        'user_id' => auth()->id(),
+        'uuid' => $validated['uuid'],
+        'filename' => $validated['name'],
+        'mime_type' => $validated['content_type'],
+        's3_key' => $permanentKey,
+        'size' => $validated['size'] ?? null,
+        'visibility' => 'private',
+    ]);
+
+    // Clean up tmp file
+    Storage::delete($validated['key']);
+
+    return response()->json([
+        'id' => $upload->id,
+        'url' => $upload->url,
+    ]);
+}
+```
+
+</CodeGroup>
+
+## Complete End-to-End Example
+
+<Tabs>
+  <Tab title="Frontend (Vue)">
+    ```vue
+    <template>
+      <div class="upload-container">
+        <input 
+          type="file" 
+          @change="handleFileUpload" 
+          :disabled="uploading"
+        />
+        
+        <div v-if="uploading" class="progress-bar">
+          <progress :value="progress" max="100"></progress>
+          <p>{{ progress }}% uploaded</p>
+        </div>
+
+        <div v-if="uploadedFile">
+          <p>File uploaded: {{ uploadedFile.filename }}</p>
+          <a :href="uploadedFile.url" target="_blank">View File</a>
+        </div>
+      </div>
+    </template>
+
+    <script setup>
+    import { ref } from 'vue';
+    import axios from 'axios';
+
+    const uploading = ref(false);
+    const progress = ref(0);
+    const uploadedFile = ref(null);
+
+    const handleFileUpload = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      uploading.value = true;
+      progress.value = 0;
+      uploadedFile.value = null;
+
+      try {
+        // Upload to S3
+        const response = await s3m(file, {
+          progress: (percent) => {
+            progress.value = percent;
+          },
+          visibility: 'private',
+        });
+
+        // Acknowledge upload on backend
+        const { data } = await axios.post('/api/files', {
+          uuid: response.uuid,
+          key: response.key,
+          name: response.name,
+          content_type: file.type,
+          size: file.size,
+        });
+
+        uploadedFile.value = data;
+      } catch (error) {
+        console.error('Upload failed:', error);
+        alert('Upload failed. Please try again.');
+      } finally {
+        uploading.value = false;
+      }
+    };
+    </script>
+    ```
+  </Tab>
+
+  <Tab title="Backend (Laravel)">
+    ```php
+    namespace App\Http\Controllers;
+
+    use App\Models\Upload;
+    use Illuminate\Http\Request;
+    use Illuminate\Support\Facades\Storage;
+
+    class FileController extends Controller
+    {
+        public function store(Request $request)
+        {
+            $validated = $request->validate([
+                'uuid' => 'required|uuid',
+                'key' => 'required|string|starts_with:tmp/',
+                'name' => 'required|string|max:255',
+                'content_type' => 'required|string',
+                'size' => 'nullable|integer|min:1',
+            ]);
+
+            // Verify file exists in S3
+            if (!Storage::exists($validated['key'])) {
+                return response()->json([
+                    'error' => 'File not found in temporary storage'
+                ], 404);
+            }
+
+            // Move to permanent storage
+            $permanentKey = str_replace('tmp/', 'uploads/', $validated['key']);
+            Storage::copy($validated['key'], $permanentKey);
+
+            // Save metadata
+            $upload = Upload::create([
+                'user_id' => auth()->id(),
+                'uuid' => $validated['uuid'],
+                'filename' => $validated['name'],
+                'mime_type' => $validated['content_type'],
+                's3_key' => $permanentKey,
+                'size' => $validated['size'],
+                'visibility' => 'private',
+            ]);
+
+            // Clean up temp file
+            Storage::delete($validated['key']);
+
+            return response()->json([
+                'id' => $upload->id,
+                'filename' => $upload->filename,
+                'url' => $upload->url,
+                'size' => $upload->size,
+            ]);
+        }
+
+        public function destroy(Upload $upload)
+        {
+            $this->authorize('delete', $upload);
+
+            $upload->delete(); // Also deletes from S3 (see model)
+
+            return response()->json([
+                'message' => 'File deleted successfully'
+            ]);
+        }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Routes">
+    ```php
+    use App\Http\Controllers\FileController;
+
+    Route::middleware('auth')->group(function () {
+        Route::post('/api/files', [FileController::class, 'store']);
+        Route::delete('/api/files/{upload}', [FileController::class, 'destroy']);
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Automatic Cleanup of Tmp Files
+
+Configure S3 lifecycle rules to automatically delete old temporary files:
+
+<Accordion title="AWS S3 Lifecycle Configuration (JSON)">
+
+```json
+{
+  "Rules": [
+    {
+      "Id": "DeleteTmpFilesAfter24Hours",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "tmp/"
+      },
+      "Expiration": {
+        "Days": 1
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 1
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 1
+      }
+    }
+  ]
+}
+```
+
+This configuration:
+- Deletes files in `tmp/` after 1 day
+- Aborts incomplete multipart uploads after 1 day
+- Applies to all files with the `tmp/` prefix
+
+</Accordion>
+
+## Best Practices
+
+<Warning>
+**Always validate on the backend**
+
+Even though the frontend sends file information, always validate:
+- File existence in S3
+- User permissions
+- File size limits
+- Allowed MIME types
+</Warning>
+
+<Note>
+**Clean up temporary files**
+
+Always delete the `tmp/` file after copying to permanent storage to avoid unnecessary storage costs.
+</Note>
+
+### Security Checklist
+
+- ✅ Verify user authorization before accepting uploads
+- ✅ Validate file types on both frontend and backend
+- ✅ Implement file size limits
+- ✅ Sanitize filenames before storage
+- ✅ Use private visibility by default
+- ✅ Implement rate limiting on upload endpoints
+- ✅ Configure S3 bucket policies appropriately
+
+### Error Handling
+
+```php
+public function store(Request $request)
+{
+    try {
+        // Validation
+        $validated = $request->validate([...]);
+
+        // Check file exists
+        if (!Storage::exists($validated['key'])) {
+            return response()->json([
+                'error' => 'File not found'
+            ], 404);
+        }
+
+        // Check file size
+        $fileSize = Storage::size($validated['key']);
+        if ($fileSize > 100 * 1024 * 1024) { // 100MB
+            Storage::delete($validated['key']);
+            return response()->json([
+                'error' => 'File too large'
+            ], 413);
+        }
+
+        // Move and save
+        $permanentKey = str_replace('tmp/', 'uploads/', $validated['key']);
+        Storage::copy($validated['key'], $permanentKey);
+        
+        $upload = Upload::create([...]);
+        
+        Storage::delete($validated['key']);
+
+        return response()->json($upload);
+
+    } catch (\Exception $e) {
+        // Clean up on error
+        if (isset($validated['key'])) {
+            Storage::delete($validated['key']);
+        }
+        
+        logger()->error('Upload failed', [
+            'error' => $e->getMessage(),
+            'user' => auth()->id(),
+        ]);
+
+        return response()->json([
+            'error' => 'Upload processing failed'
+        ], 500);
+    }
+}
+```
